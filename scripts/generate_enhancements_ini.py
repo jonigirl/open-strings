@@ -392,6 +392,43 @@ def _mission_loc_key(root: ET.Element) -> str | None:
     return None
 
 
+_FPS_TOKENS = (
+    "_fps",
+    "fps_",
+    "_onfoot",
+    "onfoot_",
+    "_ugf",
+    "ugf_",
+)
+_FPS_PLUS_SHIP_TOKENS = (
+    "cargo",
+    "recover",
+    "salvage",
+    "freight",
+    "hauling",
+)
+
+
+def _classify_mission_engagement(loc_key: str | None) -> str:
+    """Classify a mission as FPS, Ship, or FPS & Ship from its loc_key.
+
+    Uses CIG's own naming convention: FPS-themed missions embed tokens like
+    ``_fps_``, ``_ugf_``, or ``_onfoot_`` in the loc_key. Missions that also
+    involve a transport/cargo phase get the combined "FPS & Ship" label.
+
+    Returns:
+        "FPS", "Ship", or "FPS & Ship"
+    """
+    if not loc_key:
+        return "Ship"
+    key = loc_key.lower()
+    is_fps = any(t in key for t in _FPS_TOKENS)
+    if not is_fps:
+        return "Ship"
+    has_transport = any(t in key for t in _FPS_PLUS_SHIP_TOKENS)
+    return "FPS & Ship" if has_transport else "FPS"
+
+
 def _resource_amount(amount_el: ET.Element) -> str | None:
     """Extract the numeric value from a resourceAmountPerSecond element."""
     unit = amount_el.find(".//SPowerSegmentResourceUnit")
@@ -1166,6 +1203,11 @@ def _extract_spawn_counts(element: ET.Element) -> tuple[int, int, int]:
         total = sum(int(s.get("concurrentAmount", "0")) for s in ships)
         if total <= 0:
             continue
+        # Turret spawn-groups are reported separately by
+        # _extract_turret_info — skip them here so they don't double-count
+        # in the Enemies tally.
+        if "turret" in name:
+            continue
         # Classify by group name
         if any(kw in name for kw in ("target", "reinforcement", "enemy", "hostile", "pirate", "bandit")):
             num_enemies += total
@@ -1213,6 +1255,45 @@ def _extract_spawn_counts(element: ET.Element) -> tuple[int, int, int]:
                 wave_groups += 1
 
     return wave_groups, num_enemies, num_not_enemies
+
+
+def _extract_turret_info(root: ET.Element) -> str | None:
+    """Return a formatted ``count (hostility)`` string for mission turrets, or None.
+
+    Two CIG signal sources used together:
+
+    1. ``SpawnDescription_ShipGroup Name="Turrets"`` — the mission spawns
+       turrets via spawn data.  ``concurrentAmount`` on each child
+       ``SpawnDescription_Ship`` gives the count.
+    2. ``MissionProperty missionVariableName="OverrideTurretHosility_BP"``
+       (note the CIG typo: "Hosility") — explicit hostility override;
+       value="1" = hostile, value="0" = friendly.
+
+    Hostility defaults to "hostile" when no explicit override is present,
+    matching the live data where all 8 override-bearing missions set value=1.
+    """
+    turret_count = 0
+    for sg in root.findall(".//SpawnDescription_ShipGroup"):
+        if "turret" not in sg.get("Name", "").lower():
+            continue
+        ships = sg.findall(".//SpawnDescription_Ship")
+        turret_count += sum(int(s.get("concurrentAmount", "0")) for s in ships)
+
+    explicit_hostility: bool | None = None
+    for prop in root.findall(".//MissionProperty"):
+        if prop.get("missionVariableName") == "OverrideTurretHosility_BP":
+            val_el = prop.find(".//MissionPropertyValue_Boolean")
+            if val_el is not None:
+                explicit_hostility = val_el.get("value") == "1"
+            break
+
+    if turret_count == 0 and explicit_hostility is None:
+        return None
+
+    hostility = "hostile" if (explicit_hostility is None or explicit_hostility) else "friendly"
+    if turret_count > 0:
+        return f"{turret_count} ({hostility})"
+    return f"present ({hostility})"
 
 
 def _parse_difficulty_rating(value: str) -> int:
@@ -1299,6 +1380,11 @@ def enhancements_mission(root: ET.Element, reputation_lookup: dict[str, int] | N
     reputation_lookup = reputation_lookup or {}
 
     try:
+        # Engagement Type — prepended so players see loadout requirement first
+        loc_key = _mission_loc_key(root)
+        engagement = _classify_mission_engagement(loc_key)
+        lines.append(f"<EM4>Engagement Type:</EM4> {engagement}")
+
         # Extract mission flags
         flags = _extract_mission_flags(root)
         lines.append(f"<EM4>Mission Type:</EM4> {', '.join(flags) if flags else 'Standard'}")
@@ -1319,6 +1405,11 @@ def enhancements_mission(root: ET.Element, reputation_lookup: dict[str, int] | N
             lines.append(f"<EM4>Enemies:</EM4> {num_enemies}")
         if num_not_enemies > 0:
             lines.append(f"<EM4>Non-hostiles:</EM4> {num_not_enemies}")
+
+        # Turret presence — grouped with other hostile-entity tallies
+        turret_info = _extract_turret_info(root)
+        if turret_info:
+            lines.append(f"<EM4>Turrets:</EM4> {turret_info}")
 
     except Exception:
         pass
