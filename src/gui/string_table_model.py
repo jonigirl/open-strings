@@ -32,9 +32,10 @@ HEADER_LABELS = ["Category", "Key", "Default Value", "Current Value", "\u2605", 
 # Status colours
 # ---------------------------------------------------------------------------
 _STATUS_COLORS = {
-    "Modified": QColor("#4CAF50"),
-    "Unmodified": QColor("#999999"),
-    "New": QColor("#FF9800"),
+    "Modified": QColor("#4CAF50"),  # green — user-customized
+    "Enhanced": QColor("#2196F3"),  # blue — enhancements pipeline
+    "Unmodified": QColor("#999999"),  # grey — stock value, unchanged
+    "New": QColor("#FF9800"),  # orange — exists only in user/enhancements
 }
 _DEFAULT_STATUS_COLOR = QColor("black")
 

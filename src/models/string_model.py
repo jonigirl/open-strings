@@ -261,7 +261,7 @@ class StringEntry:
     category: str = ""  # Extracted from key prefix
     original_value: str = ""  # From merged sources (base file + others)
     custom_value: str = ""  # From target_strings.ini (or empty)
-    status: str = ""  # "Modified" | "Unmodified" | "New"
+    status: str = ""  # "Modified" | "Enhanced" | "Unmodified" | "New"
 
     def __post_init__(self) -> None:
         # Older call sites sometimes omitted category/status and relied on the

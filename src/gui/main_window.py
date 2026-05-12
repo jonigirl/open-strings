@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressDialog,
     QPushButton,
+    QSizePolicy,
     QStatusBar,
     QTableView,
     QTabWidget,
@@ -230,7 +231,12 @@ class MainWindow(QMainWindow):
         self.preview_pane.setOpenExternalLinks(False)
         self.preview_pane.setPlaceholderText("Select a row to preview its rendered text.")
         self.preview_pane.setMinimumWidth(420)
-        self.preview_pane.setMaximumHeight(200)
+        # Cap height so the preview pane can't inflate the toolbar row when
+        # Config/Enhancements tabs have slack vertical space to give back.
+        # setSizePolicy(Preferred, Preferred) prevents QTextBrowser's default
+        # Expanding policy from greedily consuming that slack.
+        self.preview_pane.setMaximumHeight(120)
+        self.preview_pane.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
 
         toolbar_row = QHBoxLayout()
         toolbar_row.setSpacing(12)
@@ -356,6 +362,21 @@ class MainWindow(QMainWindow):
         self.clear_cache_btn.clicked.connect(self.clear_cache)
         button_layout.addWidget(self.clear_cache_btn)
 
+        # Export — packages the currently-applied global.ini into a zip for
+        # sharing (org-wide loc-packs, Discord drops, etc.). Uses the 'open'
+        # info-action role since it produces output without touching game state.
+        self.export_locpack_btn = QPushButton("Export")
+        self.export_locpack_btn.setStyleSheet(
+            f"background-color: {get_button_color('open')}; color: {get_button_text_color()}; font-weight: bold; padding: 6px;"
+        )
+        self.export_locpack_btn.setToolTip(
+            "Package the currently-applied global.ini into a zip for sharing. "
+            "Click Apply to Game first if you haven't already — Export reads the "
+            "applied file, not the in-memory edits."
+        )
+        self.export_locpack_btn.clicked.connect(self.export_locpack)
+        button_layout.addWidget(self.export_locpack_btn)
+
         # Help — sits with the other toolbar buttons rather than floating
         # right; uses the 'open' role so it shares the blue/cyan/gold
         # information-action palette with Open Localization Dir.
@@ -398,10 +419,14 @@ class MainWindow(QMainWindow):
 
         filter_layout.addWidget(QLabel("Status:"))
         self.status_combo = QComboBox()
-        self.status_combo.addItems(["All", "Modified", "Unmodified", "New"])
+        self.status_combo.addItems(["All", "Modified", "Enhanced", "Unmodified", "New"])
         self.status_combo.setMaximumWidth(120)
         self.status_combo.setToolTip(
-            "Filter by modification status. Modified = you've set a Custom Value; New = key exists only in enhancements/user.ini, not in the base file; Unmodified = default text only."
+            "Filter by status. "
+            "Modified = you've set a Custom Value; "
+            "Enhanced = produced by the enhancements pipeline (ship stats, mission rewards, etc.); "
+            "Unmodified = default text only; "
+            "New = key exists only in enhancements/user.ini, not in the base file."
         )
         self.status_combo.currentTextChanged.connect(self.apply_filters)
         filter_layout.addWidget(self.status_combo)
@@ -900,6 +925,50 @@ class MainWindow(QMainWindow):
             self._start_startup_sync()
 
     @pyqtSlot()
+    def export_locpack(self):
+        """Package the currently-applied global.ini into a zip for sharing."""
+        if not AppSettings.get_game_install_path():
+            QMessageBox.warning(self, "Warning", "Please configure game install path in Config tab")
+            return
+
+        global_ini = AppSettings.get_global_ini_path()
+        if not global_ini.exists():
+            QMessageBox.information(
+                self,
+                "Nothing to Export",
+                "No applied global.ini was found in the game's localization directory.\n\n"
+                "Click 'Apply to Game' first to write your customizations, then "
+                "Export to package them for sharing.",
+            )
+            return
+
+        channel = AppSettings.get_active_channel()
+        default_name = default_locpack_filename(channel)
+        downloads_dir = Path.home() / "Downloads"
+        default_path = str(downloads_dir / default_name)
+
+        dest, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Loc-Pack",
+            default_path,
+            "Zip files (*.zip)",
+        )
+        if not dest:
+            return
+
+        dest_path = Path(dest)
+        try:
+            source_size = write_locpack_zip(global_ini, dest_path)
+            zip_size = dest_path.stat().st_size
+            self._status_bar().showMessage(
+                f"Exported loc-pack: {dest_path.name} ({source_size:,} bytes → {zip_size:,} bytes)",
+                8000,
+            )
+        except Exception as exc:
+            logger.exception("Export loc-pack failed: %s", exc)
+            QMessageBox.critical(self, "Export Failed", f"Could not write zip:\n{exc}")
+
+    @pyqtSlot()
     def open_localization_dir(self):
         """Open the active channel's localization directory in Windows Explorer."""
         if not AppSettings.get_game_install_path():
@@ -1022,6 +1091,7 @@ class MainWindow(QMainWindow):
         self.restore_backup_btn.setStyleSheet(f"background-color: {get_button_color('restore')}; color: {text}; {base}")
         self.clear_loc_btn.setStyleSheet(f"background-color: {get_button_color('clear')}; color: {text}; {base}")
         self.clear_cache_btn.setStyleSheet(f"background-color: {get_button_color('clear')}; color: {text}; {base}")
+        self.export_locpack_btn.setStyleSheet(f"background-color: {get_button_color('open')}; color: {text}; {base}")
         self.help_btn.setStyleSheet(f"background-color: {get_button_color('open')}; color: {text}; {base}")
         if hasattr(self, "about_browser"):
             self._render_about_html()
@@ -1463,10 +1533,15 @@ class MainWindow(QMainWindow):
             self._start_post_tutorial_tasks()
 
     def _on_tutorial_finished(self, completed: bool) -> None:
-        """Record completion on Finish; skip doesn't burn the flag so the user
-        still sees the tour on their next launch if they hit Skip by accident."""
-        if completed:
-            AppSettings.set_tutorial_completed_version(get_version())
+        """Record tutorial as seen on both Finish and Skip.
+
+        Prior behaviour only persisted on Finish so accidental skips wouldn't
+        lock users out. Community feedback reversed that: power users who
+        deliberately skip were re-prompted on every version bump, which is
+        worse than the accidental-skip risk. The Tutorial button on the toolbar
+        is always available for on-demand replay.
+        """
+        AppSettings.set_tutorial_completed_version(get_version())
         self._tutorial_tour = None
         # Now that the user is past (or has skipped) the tour, fire the
         # deferred startup tasks. Their modal prompts would otherwise pop
