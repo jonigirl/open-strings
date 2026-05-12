@@ -2,6 +2,10 @@
 
 > Upstream Smart Citizen history (0.1.x – 1.0.0) is in [UPSTREAM-HISTORY.md](UPSTREAM-HISTORY.md).
 
+## Status: Maintenance mode
+
+Open Strings is in maintenance mode as of v1.2.0. No new features are planned. The project will receive security and critical bug fixes only.
+
 ## 1.2.0 — Upstream v1.3.0 port + code quality
 
 - [x] Export Loc-Pack button — packages applied `global.ini` as a shareable zip
