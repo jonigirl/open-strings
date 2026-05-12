@@ -2,6 +2,20 @@
 
 > Upstream Smart Citizen history (0.1.x – 1.0.0) is in [UPSTREAM-HISTORY.md](UPSTREAM-HISTORY.md).
 
+## 1.2.0 — Upstream v1.3.0 port + code quality
+
+- [x] Export Loc-Pack button — packages applied `global.ini` as a shareable zip
+- [x] Enhanced status badge — Status column distinguishes auto-generated (`Enhanced`, blue) from user edits (`Modified`, green)
+- [x] Mission Engagement Type — `FPS` / `Ship` / `FPS & Ship` derived from loc-key naming in enhancements generator
+- [x] Mission Turret counts — turret counts and hostility from DataForge spawn XML in mission stats block
+- [x] Tutorial Skip persists across app version updates
+- [x] Preview pane height cap raised to 120 px; Config/Enhancements tabs no longer let preview consume all vertical space
+- [x] Dedup `_COMPONENT_CODES` — single source of truth in `string_model.py`
+- [x] Import INI: `urlretrieve` replaced with size-capped HTTPS-enforced downloader
+- [x] Bugbear ruff rules (`B`) added; all violations resolved
+- [x] Dead code removed: `source_category_filters` block, `test_category_extraction()` function
+- [x] mypy `attr-defined` error on `QCoreApplication.setFont` resolved
+
 ## 1.1.0 — Initial Fork Release
 
 - [x] Fork from Smart Citizen 1.0.0 (Osiris DevWorks)
