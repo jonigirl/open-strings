@@ -290,3 +290,31 @@
 - [x] Fix Generate Enhancements wiping pending edits: snapshot/restore of un-Applied in-memory edits across reload paths **[ported]**
 - [ ] Editor Side-Panel — held for Open Strings 1.2.0 (scope too large for a patch)
 - [ ] Journal timestamp annotations — held pending user decision on format
+
+# 1.2.0 Smart Citizen — Faster First-Run + Upgrade Reliability
+
+> The following changes were released in Smart Citizen v1.2.0 by Osiris DevWorks.
+> Items marked **[ported]** were merged into Open Strings 1.1.2.
+> Items marked **[held]** were not ported; reasons noted.
+
+- [x] Fix upgrade uninstall race: installer waits for old uninstaller's registry-key deletion before proceeding to file copy, and shows a distinct "Uninstalling previous version..." step with a marquee progress bar **[ported]**
+- [x] Fix table column headers vanishing until restart after transient layout passes (theme swap, dock toggle, splitter drag, font load): header now always paints at its base height regardless of the transient rect **[ported]**
+- [ ] Faster DataForge conversion via optimized unforge build (~5× improvement, ~23× on Save phase) — not applicable; Open Strings downloads unp4k/unforge from the upstream dolkensp/unp4k release at runtime rather than bundling a custom build
+- [ ] Update "5–10 minutes" UI text to "a few minutes" — held pending hardware verification; still accurate for some machines on our toolchain
+
+# 1.3.0 Smart Citizen — Mission Intel + Portable Build
+
+> The following changes were released in Smart Citizen v1.3.0 by Osiris DevWorks.
+> Items marked **[ported]** were merged into Open Strings 1.1.3.
+> Items marked **[held]** were not ported; reasons noted.
+
+- [x] Engagement Type in MISSION DETAILS block: classifies each mission as `FPS`, `Ship`, or `FPS & Ship` from CIG's loc-key naming convention (`_FPS_`, `_UGF_`, `_OnFoot_`) plus cargo/salvage/freight tokens that indicate a transport phase **[ported]**
+- [x] Turrets in MISSION DETAILS block: sums spawn-data turret count and surfaces the explicit hostility flag when CIG sets one; defaults to "hostile" when absent **[ported]**
+- [x] "Enhanced" status badge: Status column now distinguishes user edits (Modified, green #4CAF50) from enhancements-pipeline rows (Enhanced, blue #2196F3); filter combo and tooltip updated accordingly **[ported]**
+- [x] Export Loc-Pack button: packages the currently-applied global.ini as a channel-named zip for sharing (e.g. `OpenStrings-LocPack-LIVE-20260512.zip`), defaulting to the Downloads folder **[ported]**
+- [x] Tutorial Skip is now permanent across versions: dismissing the tour once suppresses it for all future releases **[ported]**
+- [x] Fix toolbar drift: preview pane height cap lowered from 200 px to 120 px and a `Preferred` size policy added so the toolbar row stays a constant height across all tabs **[ported]**
+- [ ] Portable build (settings, cache, and backups in a `data/` folder next to the .exe; zero registry footprint) — held; Open Strings uses the Windows registry by design and there is no user demand for a portable mode
+- [ ] Apache 2.0 relicence and NOTICE file — not applicable; Open Strings is GPL-3.0-only
+- [ ] CI/CD pipeline (GitHub Actions, auto-release on merge to main, Discord notification) — held; solo project with manual releases
+- [ ] Major main-window refactor (~600-line extraction to helpers and workers) — not applicable; the modular split this was based on originated in Open Strings and was adapted back upstream in v1.3.0
