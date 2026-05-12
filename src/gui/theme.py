@@ -69,10 +69,11 @@ def load_application_fonts() -> None:
 def apply_body_font(preference: str = "atkinson") -> None:
     """Set the application-wide body font. Call after load_application_fonts()."""
     from PyQt6.QtGui import QFont
+    from PyQt6.QtWidgets import QApplication
 
     family = BODY_FONT_OD if preference == "opendyslexic" else BODY_FONT_FAMILY
     app = QApplication.instance()
-    if app is not None:
+    if isinstance(app, QApplication):
         font = QFont(family, 10)
         app.setFont(font)
 
