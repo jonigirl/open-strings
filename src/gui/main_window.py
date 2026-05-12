@@ -59,6 +59,7 @@ from src.models.string_model import StringEntry
 from src.parser.ini_parser import load_source_files, load_sources_from_settings
 from src.utils.applied_file_validator import validate_applied_file
 from src.utils.entry_filter import filter_entry_indices
+from src.utils.locpack_exporter import default_locpack_filename, write_locpack_zip
 from src.utils.perf import timed
 from src.utils.settings import AppSettings
 from src.utils.version import get_version
