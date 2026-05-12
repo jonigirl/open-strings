@@ -229,6 +229,22 @@ class TestLoadSourceFiles:
         e = next(e for e in entries if e.key == "mission_journal_001")
         assert e.category == "Journal"
 
+    def test_user_override_of_enhancements_key_is_modified(self):
+        """A user edit on an enhancements-pipeline key should be 'Modified', not
+        'Enhanced' — user intent takes precedence over source origin."""
+        sources = {
+            "global": {"vehicle_NameHawk": "Hawk"},
+            "enhancements": {"vehicle_NameHawk": "Hawk [MLIT-S3-A]"},
+        }
+        entries = load_source_files(
+            sources,
+            ["global", "enhancements"],
+            user_overrides={"vehicle_NameHawk": "My Custom Hawk"},
+        )
+        hawk = next(e for e in entries if e.key == "vehicle_NameHawk")
+        assert hawk.status == "Modified"
+        assert hawk.custom_value == "My Custom Hawk"
+
     def test_enhancements_key_categories_overrides_category(self):
         sources = {"global": {"vehicle_NameHunter": "Cutlass"}}
         enhancements = {"vehicle_NameHunter": "CustomCategory"}

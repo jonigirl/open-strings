@@ -319,8 +319,6 @@ def _component_name_tag(desc_value: str, root: ET.Element | None = None) -> str 
     Returns:
         Tag string like "[MIL-S1-A]" or None if parsing fails.
     """
-    import re
-
     size_m = re.search(r"Size:\s*(\d+)", desc_value)
     grade_m = re.search(r"Grade:\s*([A-D])", desc_value)
     class_m = re.search(r"Class:\s*(\w+)", desc_value)
@@ -348,8 +346,6 @@ def _missile_name_tag(desc_value: str, root: ET.Element | None = None) -> str | 
     description is edited or translated. Bombs (no guidance) fall through to a
     plain [S{size}] tag.
     """
-    import re
-
     size_m = re.search(r"Size:\s*(\d+)", desc_value)
     if not size_m:
         return None
@@ -1235,8 +1231,6 @@ def _extract_spawn_counts(element: ET.Element) -> tuple[int, int, int]:
 
         if total_npcs <= 0:
             # Try parsing count from name (e.g., "Soldier x 3")
-            import re
-
             m = re.search(r"x\s*(\d+)", name)
             if m:
                 total_npcs = int(m.group(1))
