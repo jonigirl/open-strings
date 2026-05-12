@@ -5,16 +5,10 @@ from collections import defaultdict
 from functools import cache
 from pathlib import Path
 
+from src.models.string_model import _COMPONENT_CODES
 from src.utils.perf import timed
 
 logger = logging.getLogger(__name__)
-
-# Component type codes used to canonicalize item_name*/item_desc* key variants.
-# Hoisted to module scope so _get_canonical_key doesn't rebuild this list on
-# each of its ~87k calls per merge. Kept as a tuple for both the C-level
-# ``any(code in …)`` membership check and the sequential ``.replace()`` pass
-# (order-sensitive by design — see the function comment).
-_COMPONENT_CODES = ("shld", "powr", "cool", "qdrv", "jump", "misl", "gmisl", "bomb")
 
 
 @timed
@@ -240,4 +234,4 @@ def merge_ini_files(source_path: str | Path, overrides_dict: dict[str, str], out
                     outfile.write(new_line)
 
     except Exception as e:
-        raise OSError(f"Error merging INI files: {e}")
+        raise OSError(f"Error merging INI files: {e}") from e

@@ -27,7 +27,7 @@ def test_callback_invoked_with_latest_state():
 def test_callback_throttled_below_min_interval():
     events: list[tuple[int, int, str]] = []
     sink = ProgressSink(callback=lambda c, t, m: events.append((c, t, m)), total=100, min_interval=1.0)
-    for i in range(50):
+    for _ in range(50):
         sink.advance()
     # Completion still forces an emit via the `done` branch; before completion,
     # rapid calls collapse to a single emission.

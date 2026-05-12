@@ -111,32 +111,7 @@ def load_source_files(
     for source_name in filtered_hierarchy:
         source_data = sources_dict[source_name]
 
-        # User source is special - never filter it (it's app-generated overrides)
-        if source_name == AppSettings.SOURCE_USER:
-            filtered_sources[source_name] = source_data
-            continue
-
-        # Map source types to their relevant categories
-        source_category_filters = {
-            AppSettings.SOURCE_GLOBAL: None,  # No filtering - load all
-            "enhancements": None,  # No filtering
-        }
-
-        category_filter = source_category_filters.get(source_name)
-
-        if category_filter:
-            # Filter keys to only those matching the category
-            filtered_data = {}
-            for key, value in source_data.items():
-                if StringEntry.extract_category(key) == category_filter:
-                    filtered_data[key] = value
-            logger.info(
-                f"Filtered {source_name}: {len(source_data)} keys -> {len(filtered_data)} keys (category: {category_filter})"
-            )
-            filtered_sources[source_name] = filtered_data
-        else:
-            # No filtering for this source
-            filtered_sources[source_name] = source_data
+        filtered_sources[source_name] = source_data
 
     # Separate user overrides from the base merge so we can correctly populate
     # custom_value and original_value independently.

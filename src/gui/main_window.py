@@ -1102,13 +1102,13 @@ class MainWindow(QMainWindow):
     def _handle_import_ini(self):
         """Handle Import INI button: get source, validate, resolve conflicts, merge."""
         import tempfile
-        import urllib.request
 
         from PyQt6.QtWidgets import (
             QDialog,
         )
 
         from src.parser.ini_parser import parse_ini_file
+        from src.utils.updater import download_file
         from src.utils.user_ini_manager import save_user_ini_dict
 
         # Step 1: Get source path/URL from user
@@ -1136,7 +1136,7 @@ class MainWindow(QMainWindow):
                 try:
                     temp_file = tempfile.NamedTemporaryFile(suffix=".ini", delete=False)
                     temp_file.close()
-                    urllib.request.urlretrieve(source, temp_file.name)
+                    download_file(source, temp_file.name)
                     resolved_path = temp_file.name
                 except Exception as e:
                     QMessageBox.critical(self, "Download Error", f"Failed to download:\n{source}\n\n{e}")

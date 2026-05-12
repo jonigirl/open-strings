@@ -155,12 +155,12 @@ class ImportConflictDialog(QDialog):
 
     def _keep_all(self):
         """Set all resolution combos to Keep Current."""
-        for key, combo in self._combos.items():
+        for _key, combo in self._combos.items():
             combo.setCurrentIndex(0)
 
     def _import_all(self):
         """Set all resolution combos to Use Imported."""
-        for key, combo in self._combos.items():
+        for _key, combo in self._combos.items():
             combo.setCurrentIndex(1)
 
     def get_resolutions(self) -> dict[str, str]:

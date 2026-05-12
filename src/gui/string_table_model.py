@@ -224,12 +224,12 @@ class StringTableModel(QAbstractTableModel):
 
     # -- QAbstractTableModel interface --------------------------------------
 
-    def rowCount(self, parent=QModelIndex()):
+    def rowCount(self, parent=QModelIndex()):  # noqa: B008
         if parent.isValid():
             return 0
         return len(self._filtered_indices)
 
-    def columnCount(self, parent=QModelIndex()):
+    def columnCount(self, parent=QModelIndex()):  # noqa: B008
         if parent.isValid():
             return 0
         return NUM_COLUMNS

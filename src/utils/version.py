@@ -1,7 +1,10 @@
 """Version reader utility."""
 
+import logging
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def get_version() -> str:
@@ -22,6 +25,6 @@ def get_version() -> str:
         try:
             return version_file.read_text(encoding="utf-8").strip()
         except Exception:
-            pass
+            logger.debug("Failed to read VERSION.TXT", exc_info=True)
 
     return "0.1.0"

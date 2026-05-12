@@ -251,7 +251,7 @@ class TestMissionCsvAlignment:
 
         # Check that INI XP values are a subset of CSV XP values
         ini_xp_values = set()
-        for key, value in titles.items():
+        for _key, value in titles.items():
             _, xp_str = _strip_xp_tag(value)
             if xp_str:
                 # Handle ranges — take each endpoint
@@ -269,7 +269,7 @@ class TestMissionCsvAlignment:
 
         # Build set of all XP values from INI titles
         ini_xp_values = set()
-        for key, value in titles.items():
+        for _key, value in titles.items():
             _, xp_str = _strip_xp_tag(value)
             if xp_str:
                 ini_xp_values.add(xp_str.replace(",", ""))

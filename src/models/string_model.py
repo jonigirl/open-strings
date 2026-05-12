@@ -298,28 +298,3 @@ class StringEntry:
         - Everything else → Other
         """
         return _extract_category_impl(key)
-
-
-def test_category_extraction():
-    """Test category extraction for edge cases."""
-    # Ship components with underscore between Name and component code
-    assert StringEntry.extract_category("item_Name_QDRV_RSI_S02_Hemera") == "Ship Items"
-    assert StringEntry.extract_category("item_Desc_QDRV_RSI_S02_Hemera") == "Ship Items"
-
-    # Ship components with lowercase item_name (from Data.p4k extraction)
-    assert StringEntry.extract_category("item_nameQDRV_RSI_S02_Hemera_SCItem") == "Ship Items"
-    assert StringEntry.extract_category("item_descqdrv_rsi_s02_hemera_scitem") == "Ship Items"
-
-    # Ship weapons with XL size designator
-    assert StringEntry.extract_category("item_Name_XL-1_something") == "Ship Items"
-    assert StringEntry.extract_category("item_Name_XXL_something") == "Ship Items"
-
-    # Regular ship components (original patterns)
-    assert StringEntry.extract_category("item_NameSHLD_Aspirum") == "Ship Items"
-    assert StringEntry.extract_category("item_NamePOWR_TR1") == "Ship Items"
-    assert StringEntry.extract_category("item_Name_Turret_S1") == "Ship Items"
-
-    # FPS weapons (should still work)
-    assert StringEntry.extract_category("item_Name_rifle") == "Gear"
-
-    print("[PASS] All category extraction tests passed!")

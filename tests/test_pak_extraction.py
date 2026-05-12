@@ -114,7 +114,7 @@ class TestDataForgeExtraction:
             p4k_path = os.path.join(tmpdir, "Data.p4k")
             with open(p4k_path, "w") as f:
                 f.write("dummy")
-            with pytest.raises(Exception):
+            with pytest.raises(Exception):  # noqa: B017 — test calls wrong arg count; TypeError is expected here
                 extract_dataforge(p4k_path, os.path.join(tmpdir, "cache"))
 
     @patch("src.utils.pak_extractor.subprocess.run")
@@ -128,7 +128,7 @@ class TestDataForgeExtraction:
             p4k_path = os.path.join(tmpdir, "Data.p4k")
             with open(p4k_path, "w") as f:
                 f.write("dummy")
-            with pytest.raises(Exception):
+            with pytest.raises(Exception):  # noqa: B017 — test calls wrong arg count; TypeError is expected here
                 extract_dataforge(p4k_path, os.path.join(tmpdir, "cache"))
             # subprocess.run is called at most once (the first tool invocation)
             assert mock_run.call_count <= 1

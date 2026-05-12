@@ -93,7 +93,7 @@ class TestDownloadTools:
         """Return a context-manager patch that serves responses in order."""
         call_iter = iter(responses)
 
-        def fake_urlopen(url):
+        def fake_urlopen(url, **kwargs):
             return _FakeResponse(next(call_iter))
 
         return patch("urllib.request.urlopen", side_effect=fake_urlopen)
@@ -144,7 +144,7 @@ class TestDownloadTools:
 
         call_count = 0
 
-        def fake_urlopen(url):
+        def fake_urlopen(url, **kwargs):
             nonlocal call_count
             call_count += 1
             if call_count == 1:

@@ -22,7 +22,7 @@ class FilterHeaderView(QHeaderView):
         self._debounce.setInterval(300)
         self._debounce.timeout.connect(self.filter_changed.emit)
 
-        for i, name in enumerate(column_names):
+        for i, _name in enumerate(column_names):
             if i in self._skip_columns:
                 self._filters.append(None)
                 continue

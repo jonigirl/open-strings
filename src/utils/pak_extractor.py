@@ -477,6 +477,7 @@ def dataforge_cache_is_fresh(p4k_path: Path | str, dataforge_cache_dir: Path | s
         try:
             return dataforge_cache_dir.exists() and dataforge_cache_dir.stat().st_mtime >= p4k_path.stat().st_mtime
         except Exception:
+            logger.debug("dataforge_cache_is_fresh: legacy mtime check failed", exc_info=True)
             return False
     if not stamp.exists() or not libs_dir.exists():
         return False
@@ -487,4 +488,5 @@ def dataforge_cache_is_fresh(p4k_path: Path | str, dataforge_cache_dir: Path | s
         cached_mtime = float(stamp.read_text().strip())
         return cached_mtime >= p4k_path.stat().st_mtime
     except Exception:
+        logger.debug("dataforge_cache_is_fresh: stamp read/mtime check failed", exc_info=True)
         return False
