@@ -117,84 +117,13 @@ OpenStrings-v0.1.0-Setup.exe
 
 ---
 
-## Code Signing (Optional)
+## Code Signing
 
-Signing requires a Windows code-signing certificate. Without one, the build still works — Windows will show an "Unknown Publisher" SmartScreen warning when users run the installer.
+Builds are always self-signed automatically — no configuration needed.
 
-There are three signing modes; all are optional and off by default.
+A temporary self-signed certificate is created in your Windows cert store and used to sign the executable. The installer is not separately signed. SmartScreen will still show an "Unknown Publisher" warning (this is expected for self-signed builds).
 
-### Option 1 — Self-sign (no cert required)
-
-Creates a temporary self-signed certificate in your Windows cert store and signs both binaries with it. The SmartScreen warning still appears ("Unknown Publisher"), but the binary is cryptographically signed — useful for testing the signing pipeline before buying a cert, or for internal/dev builds.
-
-```powershell
-# Interactive build — prompted at the end of the build
-uv run python scripts/build/build_exe.py
-
-# Non-interactive
-uv run python scripts/build/build_exe.py --self-sign
-
-# Via build_all.bat
-$env:SC_SELF_SIGN = "1"
-scripts\build\build_all.bat
-```
-
-### Option 2 — CA-issued certificate (removes SmartScreen warning)
-
-| Cert type               | Cost         | Notes                                                |
-| ----------------------- | ------------ | ---------------------------------------------------- |
-| **SignPath Foundation** | Free (OSS)   | Apply at signpath.io — approval takes a few days     |
-| **Sectigo / Comodo OV** | ~€80–150/yr  | Standard OV cert, issued in a few hours              |
-| **EV cert**             | ~€300–500/yr | Immediately removes SmartScreen warning on first run |
-
-Set environment variables before building. Only one cert source is needed:
-
-```powershell
-# Option A — PFX file
-$env:SC_SIGN_CERT     = "C:\path\to\cert.pfx"
-$env:SC_SIGN_PASSWORD = "your-pfx-password"   # omit if the PFX has no password
-
-# Option B — cert already installed in Windows cert store
-$env:SC_SIGN_THUMB = "AABBCCDDEEFF..."        # SHA-1 thumbprint from certmgr.msc
-
-# Optional: override signtool.exe path (auto-detected from Windows SDK if unset)
-$env:SIGNTOOL_PATH = "C:\path\to\signtool.exe"
-```
-
-`build_all.bat` detects these vars automatically and signs both binaries. When the vars are not set, signing is silently skipped (or you will be prompted if running in a terminal).
-
-### Option 3 — Interactive prompt
-
-When `build_exe.py` is run from a terminal without `--sign` / `--self-sign` and without signing env vars set, it asks at the end of the build:
-
-```
-  1) Skip — leave unsigned
-  2) Self-sign — sign with a new temporary self-signed cert
-  3) Sign now — enter a cert-store thumbprint or PFX path
-```
-
-Skipped automatically in CI / non-TTY environments.
-
-### Manual signing
-
-```powershell
-# Sign using env vars (CA cert)
-uv run python scripts/build/build_exe.py --sign
-
-# Self-sign
-uv run python scripts/build/build_exe.py --self-sign
-
-# Sign any arbitrary file (CA cert)
-uv run python scripts/build/build_exe.py --sign-file dist\OpenStrings-1.0.0-Setup.exe
-
-# Sign any arbitrary file (self-signed)
-uv run python scripts/build/build_exe.py --self-sign --sign-file dist\OpenStrings-1.0.0-Setup.exe
-```
-
-### What gets signed
-
-- `dist/OpenStrings/OpenStrings.exe` — the PyInstaller app (signed before installer is built)
-- `dist/OpenStrings-{version}-Setup.exe` — the Inno Setup installer
+No environment variables, prompts, or flags are required.
 
 ---
 

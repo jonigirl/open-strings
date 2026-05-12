@@ -1,83 +1,21 @@
 @echo off
 setlocal enabledelayedexpansion
 :: Always run from the project root regardless of where this script is invoked from
-cd /d "%~dp0..\.."
+cd /d "%~dp0..\.." 
 
 echo ========================================
 echo Open Strings - Build Script
 echo ========================================
 echo.
 
-:: ---------------------------------------------------------------------------
-:: Detect code-signing configuration (all optional)
-::   SC_SIGN_THUMB     SHA-1 thumbprint of a cert already in Windows cert store
-::   SC_SIGN_CERT      Path to a PFX certificate file
-::   SC_SIGN_PASSWORD  Password for the PFX file (leave unset for password-less certs)
-::   SC_SELF_SIGN      Set to 1 to self-sign with a new temporary cert (no CA required)
-:: ---------------------------------------------------------------------------
-set SIGN_BUILD=0
-set SELF_SIGN=0
-if not "%SC_SIGN_THUMB%"=="" set SIGN_BUILD=1
-if not "%SC_SIGN_CERT%"==""  set SIGN_BUILD=1
-if "%SC_SELF_SIGN%"=="1" (
-    set SIGN_BUILD=1
-    set SELF_SIGN=1
-)
-
-if "%SELF_SIGN%"=="1" (
-    echo Code signing: SELF-SIGNED  ^(integrity only; SmartScreen warning remains^)
-    goto :sign_ready
-)
-if "%SIGN_BUILD%"=="1" (
-    echo Code signing: ENABLED ^(CA cert^)
-    goto :sign_ready
-)
-
-echo Code signing: not configured. Choose an option:
-echo.
-echo   1) Unsigned     - SmartScreen "Unknown Publisher" warning
-echo   2) Self-signed  - temporary cert, integrity only (no CA required)
-echo   3) Certificate  - cert-store thumbprint or PFX file
-echo.
-set /p SIGN_CHOICE=Choice [1/2/3] (default 1): 
-echo.
-if "!SIGN_CHOICE!"=="2" goto :sign_self
-if "!SIGN_CHOICE!"=="3" goto :sign_cert
-echo Code signing: DISABLED  (unsigned)
-goto :sign_ready
-
-:sign_self
-set SIGN_BUILD=1
-set SELF_SIGN=1
-echo Code signing: SELF-SIGNED  (integrity only; SmartScreen warning remains)
-goto :sign_ready
-
-:sign_cert
-set SIGN_BUILD=1
-set /p SC_SIGN_THUMB=  Thumbprint (SHA-1 from certmgr.msc, or blank to use PFX): 
-if "!SC_SIGN_THUMB!"=="" (
-    set /p SC_SIGN_CERT=  PFX path: 
-    set /p SC_SIGN_PASSWORD=  PFX password (blank if none): 
-)
-echo Code signing: ENABLED ^(cert^)
-
-:sign_ready
-echo.
-
 echo Step 1: Cleaning old builds...
 if exist build rmdir /s /q build
-if exist dist rmdir /s /q dist
+if exist dist  rmdir /s /q dist
 echo   - Old builds removed
 echo.
 
-echo Step 2: Building executable...
-if "%SELF_SIGN%"=="1" (
-    uv run python scripts\build\build_exe.py --self-sign
-) else if "%SIGN_BUILD%"=="1" (
-    uv run python scripts\build\build_exe.py --sign
-) else (
-    uv run python scripts\build\build_exe.py --no-prompt
-)
+echo Step 2: Building executable (self-signed)...
+uv run python scripts\build\build_exe.py --self-sign
 if errorlevel 1 (
     echo ERROR: Failed to build executable
     pause
@@ -116,23 +54,6 @@ if "%ISCC%"=="" (
     )
 )
 echo.
-
-if "%SIGN_BUILD%"=="1" (
-    echo Step 5: Signing installer...
-    for %%f in (dist\OpenStrings-*-Setup.exe) do (
-        if "%SELF_SIGN%"=="1" (
-            uv run python scripts\build\build_exe.py --self-sign --sign-file "%%f"
-        ) else (
-            uv run python scripts\build\build_exe.py --sign-file "%%f"
-        )
-        if errorlevel 1 (
-            echo ERROR: Failed to sign installer
-            pause
-            exit /b 1
-        )
-    )
-    echo.
-)
 
 echo ========================================
 echo Build Complete!
