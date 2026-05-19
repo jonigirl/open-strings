@@ -2659,7 +2659,8 @@ class MainWindow(QMainWindow):
                 continue
 
             entry = self.entries[entry_idx]
-            line = f"{entry.key}\t{entry.original_value}\t{entry.original_value}\t{entry.custom_value}\t{entry.status}"
+            original = self.default_values.get(entry.key, entry.original_value)
+            line = f"{entry.key}\t{original}\t{entry.original_value}\t{entry.custom_value}\t{entry.status}"
             lines.append(line)
 
         if len(lines) <= 1:

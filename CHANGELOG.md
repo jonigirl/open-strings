@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `os.path.normpath()` applied at all five path-setting call sites in `config_tab.py` to prevent double-separator paths on Windows
 - Enhancement generation worker now skips unchanged categories instead of always regenerating all — reduces unnecessary DataForge re-processing after clean extractions
 - DataForge extraction worker progress dialog now stays open across the extraction→enhancement handoff and closes correctly on failure
+- "Copy Filtered" clipboard export now shows the true stock base.ini value in the "Original Value" column (previously showed the merged effective value for both "Original Value" and "Current Value")
 
 ### Changed
 
