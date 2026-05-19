@@ -219,9 +219,10 @@ def load_sources_from_settings() -> tuple[dict[str, dict[str, str]], list[str], 
     Remote sources are downloaded asynchronously by the update checker, not here.
 
     Returns:
-        Tuple of (sources_dict, hierarchy) where:
+        Tuple of (sources_dict, hierarchy, enhancements_key_categories) where:
         - sources_dict: Dict mapping source names to key-value dicts
         - hierarchy: List of source names in merge order
+        - enhancements_key_categories: Dict mapping enhancement key → category name
     """
     from src.utils.settings import AppSettings
 

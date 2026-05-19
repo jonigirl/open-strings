@@ -67,6 +67,10 @@ from src.utils.version import get_version
 
 logger = logging.getLogger(__name__)
 
+# Maximum number of timestamped backup files kept in the backups directory.
+# The oldest is pruned when a new backup would exceed this limit.
+_MAX_BACKUPS = 5
+
 # Preview-pane token translation — turns the raw loc-string format the game
 # reads into styled HTML that mirrors the in-game feel. Patterns:
 #   \n              → line break
@@ -134,7 +138,7 @@ def _render_preview_html(key: str, raw: str) -> str:
         body = escaped
 
     return (
-        '<div style="font-family:Segoe UI,sans-serif;font-size:10pt;line-height:1.45;">'
+        '<div style="font-family:Atkinson Hyperlegible,Arial,sans-serif;font-size:10pt;line-height:1.45;">'
         f'<div style="color:#888;font-size:8pt;margin-bottom:8px;'
         f'font-family:Consolas,monospace;">{_html_mod.escape(key)}</div>'
         "<br>"
@@ -657,7 +661,7 @@ class MainWindow(QMainWindow):
                 backup_files = sorted(backup_dir.glob("global.ini.bak_*"), key=lambda f: f.stat().st_mtime)
 
                 # Delete oldest backup if we already have 5
-                if len(backup_files) >= 5:
+                if len(backup_files) >= _MAX_BACKUPS:
                     oldest_backup = backup_files[0]
                     oldest_backup.unlink()
                     logger.info(f"Deleted oldest backup: {oldest_backup.name}")
@@ -948,7 +952,6 @@ class MainWindow(QMainWindow):
                 logger.info("Deleted DataForge cache directory")
             except Exception as e:
                 failed.append(f"dataforge/: {e}")
-                logger.error(f"Failed to delete DataForge cache: {e}")
                 logger.error(f"Failed to delete DataForge cache: {e}")
 
         progress.close()

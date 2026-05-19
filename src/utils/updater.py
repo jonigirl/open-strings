@@ -55,7 +55,7 @@ def download_file(url: str, output_path: str | Path) -> Path:
                         raise ValueError(f"Download exceeds {_MAX_DOWNLOAD_BYTES // 1_048_576} MB limit: {url!r}")
                     chunks.append(chunk)
                 except TimeoutError:
-                    logger.warning("Download timeout, retrying...")
+                    logger.warning("Download timed out")
                     raise
 
             file_data = b"".join(chunks)

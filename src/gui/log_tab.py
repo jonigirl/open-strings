@@ -189,7 +189,7 @@ class LogTab(QWidget):
         self._status_label.setText("0 lines")
 
     def _export(self):
-        default_name = f"sc_loc_editor_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        default_name = f"open_strings_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
         path, _ = QFileDialog.getSaveFileName(
             self, "Export log", default_name, "Log files (*.log);;Text files (*.txt);;All files (*)"
         )

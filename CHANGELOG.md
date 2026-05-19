@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `CATEGORY_SUBTREES` paths in `dataforge_diff.py` were all missing the `foundry/records/` prefix — `dirty_categories()` always returned an empty set, so enhancement generators never re-ran after a DataForge update; all 7 entries corrected with 22 regression tests (`tests/test_dataforge_diff.py`)
+- `TimeoutError` handler in `updater.py` logged "Download timeout, retrying…" but immediately re-raises with no retry; message corrected to "Download timed out"
+- Duplicate `logger.error` call in `clear_cache` DataForge deletion error handler removed (copy-paste bug)
 - `g_language` key detection in `user_cfg.py` is now case-insensitive via regex (`g_Language`, `G_LANGUAGE`, etc. all matched correctly)
 - `os.path.normpath()` applied at all five path-setting call sites in `config_tab.py` to prevent double-separator paths on Windows
 - Enhancement generation worker now skips unchanged categories instead of always regenerating all — reduces unnecessary DataForge re-processing after clean extractions
@@ -30,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Preview pane and Help/About panels now render with Atkinson Hyperlegible font (previously Segoe UI)
+- Log export filename changed from `sc_loc_editor_{timestamp}.log` to `open_strings_{timestamp}.log`
 - "Preview Merge" renamed to "Preview Apply" throughout the Config tab UI
 - "Smart Citizen Enhancements" label updated to "Open Strings Enhancements" in Apply dialog
 - Apply success dialog shows per-category enhancement counts via `collections.Counter`

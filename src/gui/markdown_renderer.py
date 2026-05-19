@@ -93,7 +93,7 @@ def markdown_to_html(
     """
     html = "<html><head><style>"
     html += (
-        f"body {{ font-family: Segoe UI, Arial, sans-serif; line-height: 1.8; "
+        f"body {{ font-family: Atkinson Hyperlegible, Arial, sans-serif; line-height: 1.8; "
         f"padding: 20px; font-size: 15px; color: {text_color}; "
         f"background-color: {base_color}; }}"
     )

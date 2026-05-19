@@ -32,15 +32,40 @@ MANIFEST_FILE = ".diff_manifest.json"
 _HASH_WORKERS = max(8, (os.cpu_count() or 4) * 2)
 
 # Maps category name → DataForge subtree prefixes it reads from.
-# Mirrors DATAFORGE_KEEP_SUBPATHS in pak_extractor.py — keep in sync.
+# Paths are relative to the libs/ directory (the cache_dir argument passed to
+# update_manifest and dirty_categories), so they all start with
+# "foundry/records/".  Mirrors DATAFORGE_KEEP_SUBPATHS in pak_extractor.py —
+# keep in sync when new subtrees are added.
 CATEGORY_SUBTREES: dict[str, list[str]] = {
-    "ships": ["entities/ships", "entities/spaceships"],
-    "components": ["entities/itemports", "entities/scitem"],
-    "ship_weapons": ["entities/scitem/weapons/spacecraft"],
-    "fps_weapons": ["entities/scitem/weapons/fps"],
-    "missions": ["entities/missions", "libs/foundry/records/missions"],
-    "commodities": ["entities/scitem/cargo", "libs/economy"],
-    "journal": ["libs/foundry/records/journal"],
+    "ships": ["foundry/records/entities/spaceships"],
+    "components": ["foundry/records/entities/scitem"],
+    "ship_weapons": [
+        "foundry/records/entities/scitem/ships/weapons",
+        "foundry/records/ammoparams/vehicle",
+    ],
+    "fps_weapons": [
+        "foundry/records/entities/scitem/weapons/fps_weapons",
+        "foundry/records/ammoparams/fps",
+    ],
+    "missions": [
+        "foundry/records/missionbroker/pu_missions",
+        "foundry/records/entities/missions",
+        "foundry/records/entities/contracts",
+        "foundry/records/entities/jobterminal",
+        "foundry/records/contracts/contractgenerator",
+        "foundry/records/contracts/contracttemplates",
+        "foundry/records/crafting/blueprintrewards",
+        "foundry/records/crafting/blueprints/crafting",
+        "foundry/records/reputation/rewards/missionrewards_reputation",
+    ],
+    "commodities": [
+        "foundry/records/crafting/blueprints/crafting",
+        "foundry/records/entities/scitem",
+    ],
+    "journal": [
+        "foundry/records/crafting/blueprints/crafting",
+        "foundry/records/entities/scitem",
+    ],
 }
 
 

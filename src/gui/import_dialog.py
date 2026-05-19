@@ -27,6 +27,7 @@ class ImportConflictDialog(QDialog):
         "Prepend Imported",
         "Custom...",
     ]
+    _IDX_CUSTOM = RESOLUTION_OPTIONS.index("Custom...")
 
     def __init__(self, conflicts: dict[str, tuple[str, str]], auto_add_count: int, excluded_count: int, parent=None):
         super().__init__(parent)
@@ -137,7 +138,7 @@ class ImportConflictDialog(QDialog):
 
     def _on_resolution_changed(self, key: str, index: int):
         """Handle resolution combo change. Prompt for custom value if needed."""
-        if index == 4:  # Custom...
+        if index == self._IDX_CUSTOM:  # Custom...
             current_val, imported_val = self._conflicts[key]
             initial = self._custom_values.get(key, imported_val)
             text, ok = QInputDialog.getText(self, "Custom Value", f"Enter custom value for key:\n{key}", text=initial)
@@ -179,7 +180,7 @@ class ImportConflictDialog(QDialog):
                 resolutions[key] = current_value + imported_value
             elif index == 3:  # Prepend Imported
                 resolutions[key] = imported_value + current_value
-            elif index == 4:  # Custom
+            elif index == self._IDX_CUSTOM:  # Custom
                 resolutions[key] = self._custom_values.get(key, current_value)
 
         return resolutions
