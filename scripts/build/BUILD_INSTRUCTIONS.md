@@ -99,7 +99,7 @@ This runs both build_exe.py and Inno Setup automatically.
 The installer will be created in the project root as:
 
 ```
-OpenStrings-v0.1.0-Setup.exe
+OpenStrings-{VERSION}-Setup.exe
 ```
 
 ---
@@ -148,7 +148,9 @@ The installer includes:
 For future versions:
 
 1. Update version in:
-   - `VERSION.TXT` (e.g., `1.1.0`) — this is the single source of truth; `installer.iss` reads it via ISPP
+   - `VERSION.TXT` (e.g., `1.3.0`) — this is the single source of truth; `installer.iss` reads it via ISPP
+   - `pyproject.toml` — `version = "..."` field
+   - `CHANGELOG.md` — rename `[Unreleased]` to `[X.Y.Z] - YYYY-MM-DD` and add a new `[X.Y.Z]` diff link at the bottom
 
 2. Rebuild:
 
