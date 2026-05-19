@@ -2,7 +2,12 @@
 
 import pytest
 from src.models.string_model import StringEntry
-from src.utils.user_ini_manager import generate_user_ini_from_diff, save_user_ini, save_user_ini_dict
+from src.utils.user_ini_manager import (
+    generate_user_ini_from_diff,
+    save_user_ini,
+    save_user_ini_dict,
+    should_autosave_user_ini,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -63,6 +68,29 @@ class TestSaveUserIniDict:
         deep_path = tmp_path / "x" / "y" / "user.ini"
         save_user_ini_dict({"k": "v"}, deep_path)
         assert deep_path.exists()
+
+
+class TestShouldAutosaveUserIni:
+    def test_returns_true_when_entry_is_modified(self, tmp_path):
+        path = tmp_path / "user.ini"
+        entries = [StringEntry(key="k", source_file="global", original_value="v", custom_value="new")]
+        assert should_autosave_user_ini(entries, path) is True
+
+    def test_returns_true_when_file_does_not_exist(self, tmp_path):
+        entries = [StringEntry(key="k", source_file="global", original_value="v", custom_value="")]
+        assert should_autosave_user_ini(entries, tmp_path / "nonexistent.ini") is True
+
+    def test_returns_true_when_file_is_empty(self, tmp_path):
+        path = tmp_path / "user.ini"
+        path.write_text("", encoding="utf-8")
+        entries = [StringEntry(key="k", source_file="global", original_value="v", custom_value="")]
+        assert should_autosave_user_ini(entries, path) is True
+
+    def test_returns_false_when_file_has_content_and_no_modified_entries(self, tmp_path):
+        path = tmp_path / "user.ini"
+        path.write_text("k=v\n", encoding="utf-8")
+        entries = [StringEntry(key="k", source_file="global", original_value="v", custom_value="")]
+        assert should_autosave_user_ini(entries, path) is False
 
 
 class TestGenerateUserIniFromDiff:

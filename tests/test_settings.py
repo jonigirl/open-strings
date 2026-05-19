@@ -404,6 +404,19 @@ class TestSourceAutoUpdate:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+class TestFontPreference:
+    def test_default_is_atkinson(self, isolated_qsettings):
+        assert AppSettings.get_font_preference() == AppSettings.FONT_ATKINSON
+
+    def test_roundtrip_opendyslexic(self, isolated_qsettings):
+        AppSettings.set_font_preference(AppSettings.FONT_OPENDYSLEXIC)
+        assert AppSettings.get_font_preference() == AppSettings.FONT_OPENDYSLEXIC
+
+    def test_invalid_stored_value_returns_default(self, isolated_qsettings):
+        AppSettings.settings().setValue(AppSettings.FONT_PREFERENCE, "comic_sans")
+        assert AppSettings.get_font_preference() == AppSettings.DEFAULT_FONT
+
+
 class TestEnsureUserIni:
     def test_creates_empty_file_if_missing(self, isolated_qsettings, fake_user_data_dir):
         AppSettings.ensure_user_ini_file()
