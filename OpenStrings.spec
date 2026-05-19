@@ -26,11 +26,16 @@ a = Analysis(
     # generate_enhancements_ini.py; PyInstaller doesn't include it
     # automatically when the script is a data file rather than an analyzed
     # module, causing a ModuleNotFoundError at enhancements generation time.
+    # `xml.etree.ElementTree` is also required by generate_enhancements_ini.py
+    # for parsing DataForge XML. It was previously pulled in indirectly via
+    # dataforge_patcher.py, which was switched to lxml in 1.3.0, leaving
+    # xml.etree with no analyzed reference and breaking enhancements generation.
     hiddenimports=[
         'PyQt6.QtCore', 'PyQt6.QtGui', 'PyQt6.QtWidgets',
         'src.utils.progress_sink',
         'src.utils.dataforge_patcher',
         'concurrent.futures',
+        'xml.etree.ElementTree',
     ],
     hookspath=[],
     hooksconfig={},

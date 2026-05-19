@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-05-20
+
+### Fixed
+
+- Enhancements generation crashed with `No module named 'xml.etree'` in the built executable — `generate_enhancements_ini.py` is bundled as a data file so PyInstaller does not analyse its imports; `xml.etree.ElementTree` lost its only analysed reference when `dataforge_patcher.py` switched to `lxml` in 1.3.0, so it was silently dropped from the bundle. Added `xml.etree.ElementTree` to `hiddenimports` in `OpenStrings.spec`.
+
 ## [1.3.0] - 2026-05-20
 
 ### Added
