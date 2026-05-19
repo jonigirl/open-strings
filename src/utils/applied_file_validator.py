@@ -11,6 +11,8 @@ from src.parser.ini_parser import parse_ini_file
 
 logger = logging.getLogger(__name__)
 
+_VALIDATION_SAMPLE_SIZE = 20
+
 
 def validate_applied_file(
     written_path: Path,
@@ -68,20 +70,20 @@ def validate_applied_file(
     lines = []
 
     if missing:
-        sample = sorted(missing)[:20]
+        sample = sorted(missing)[:_VALIDATION_SAMPLE_SIZE]
         lines += [f"{len(missing)} key(s) from base.ini are missing from the written file:"]
         lines += [f"  {k}" for k in sample]
-        if len(missing) > 20:
-            lines.append(f"  ... and {len(missing) - 20} more")
+        if len(missing) > _VALIDATION_SAMPLE_SIZE:
+            lines.append(f"  ... and {len(missing) - _VALIDATION_SAMPLE_SIZE} more")
 
     if extra:
         if lines:
             lines.append("")
-        sample = sorted(extra)[:20]
+        sample = sorted(extra)[:_VALIDATION_SAMPLE_SIZE]
         lines += [f"{len(extra)} unexpected key(s) in written file (not in base.ini):"]
         lines += [f"  {k}" for k in sample]
-        if len(extra) > 20:
-            lines.append(f"  ... and {len(extra) - 20} more")
+        if len(extra) > _VALIDATION_SAMPLE_SIZE:
+            lines.append(f"  ... and {len(extra) - _VALIDATION_SAMPLE_SIZE} more")
 
     lines += ["", "The previous file has been restored. Check your source configuration."]
     return "\n".join(lines)

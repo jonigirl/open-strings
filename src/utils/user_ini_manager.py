@@ -10,6 +10,19 @@ from src.utils.perf import timed
 logger = logging.getLogger(__name__)
 
 
+def _write_kv_to_path(data: dict[str, str], path: Path) -> int:
+    """Write key=value pairs to *path*. Returns the number of entries written."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            for key, value in data.items():
+                f.write(f"{key}={value}\n")
+        return len(data)
+    except Exception as e:
+        logger.error(f"Failed to save {path}: {e}")
+        raise
+
+
 def should_autosave_user_ini(entries: list[StringEntry], user_ini_path: Path) -> bool:
     """Return False when writing would replace non-empty on-disk content with nothing.
 
@@ -52,23 +65,10 @@ def save_user_ini(entries: list[StringEntry], user_ini_path: Path) -> int:
     Raises:
         IOError: If write fails
     """
-    # Filter to entries the user actually modified (custom differs from original)
     user_edits = {entry.key: entry.custom_value for entry in entries if entry.is_modified}
-
-    user_ini_path.parent.mkdir(parents=True, exist_ok=True)
-
-    try:
-        with open(user_ini_path, "w", encoding="utf-8") as f:
-            for key, value in user_edits.items():
-                f.write(f"{key}={value}\n")
-
-        count = len(user_edits)
-        logger.info(f"Saved {count} user edits to {user_ini_path}")
-        return count
-
-    except Exception as e:
-        logger.error(f"Failed to save user.ini: {e}")
-        raise
+    count = _write_kv_to_path(user_edits, user_ini_path)
+    logger.info(f"Saved {count} user edits to {user_ini_path}")
+    return count
 
 
 @timed
@@ -85,20 +85,9 @@ def save_user_ini_dict(data: dict[str, str], user_ini_path: Path) -> int:
     Returns:
         Number of entries written
     """
-    user_ini_path.parent.mkdir(parents=True, exist_ok=True)
-
-    try:
-        with open(user_ini_path, "w", encoding="utf-8") as f:
-            for key, value in data.items():
-                f.write(f"{key}={value}\n")
-
-        count = len(data)
-        logger.info(f"Saved {count} entries to {user_ini_path}")
-        return count
-
-    except Exception as e:
-        logger.error(f"Failed to save user.ini: {e}")
-        raise
+    count = _write_kv_to_path(data, user_ini_path)
+    logger.info(f"Saved {count} entries to {user_ini_path}")
+    return count
 
 
 @timed
@@ -141,13 +130,9 @@ def generate_user_ini_from_diff(reference_path: Path, current_path: Path, user_i
             logger.info("No differences found between reference and current file")
             return 0
 
-        user_ini_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(user_ini_path, "w", encoding="utf-8") as f:
-            for key, value in diffs.items():
-                f.write(f"{key}={value}\n")
-
-        logger.info(f"Bootstrapped {len(diffs)} user edits from diff")
-        return len(diffs)
+        count = _write_kv_to_path(diffs, user_ini_path)
+        logger.info(f"Bootstrapped {count} user edits from diff")
+        return count
 
     except Exception as e:
         logger.warning(f"Failed to generate user.ini from diff: {e}")

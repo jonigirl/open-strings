@@ -251,7 +251,7 @@ def load_sources_from_settings() -> tuple[dict[str, dict[str, str]], list[str], 
 
         try:
             # Handle URLs vs local files
-            if source_path.startswith("http://") or source_path.startswith("https://"):
+            if source_path.startswith(("http://", "https://")):
                 # For remote sources, load from cached local file in AppData (must exist)
                 if source_name in cache_mapping:
                     cache_file = cache_dir / cache_mapping[source_name]
@@ -302,17 +302,6 @@ def load_sources_from_settings() -> tuple[dict[str, dict[str, str]], list[str], 
             logger.exception(f"Failed to load source {source_name} from {source_path}: {e}")
 
     # ── Enhancements ────────────────────────────────────────────────────────
-    # Map enhancements file labels to the category their keys should be assigned to
-    _ENHANCEMENTS_LABEL_CATEGORY = {
-        "ship_descs": "Ships",
-        "component_descs": "Ship Items",
-        "ship_weapon_descs": "Ship Items",
-        "fps_weapon_descs": "Gear",
-        "mission_rewards": "Missions",
-        "commodity_crafting": "Commodities",
-        "journal": "Journal",
-        "missile_enhancements": "Ship Items",
-    }
     enhancements_key_categories: dict[str, str] = {}
     enabled_categories = AppSettings.get_enabled_enhancement_categories()
     if enabled_categories:

@@ -8,6 +8,8 @@ from src.utils.settings import AppSettings
 
 logger = logging.getLogger(__name__)
 
+_LANGUAGE_SETTING = "g_language = english"
+
 # Match any ``g_language`` assignment regardless of spacing, case, or value.
 # SC's user.cfg parser is lenient: ``g_language=english``, ``G_Language =
 # English``, and ``g_language = "english"`` are all valid. The previous
@@ -49,13 +51,12 @@ def ensure_user_cfg_language() -> bool:
         return False
 
     user_cfg_path = channel_dir / "user.cfg"
-    language_line = "g_language = english"
 
     try:
         if not user_cfg_path.exists():
             logger.info(f"Creating user.cfg at {user_cfg_path}")
-            user_cfg_path.write_text(language_line + "\n", encoding="utf-8")
-            logger.info(f"Created user.cfg with '{language_line}'")
+            user_cfg_path.write_text(_LANGUAGE_SETTING + "\n", encoding="utf-8")
+            logger.info(f"Created user.cfg with '{_LANGUAGE_SETTING}'")
             return True
 
         content = user_cfg_path.read_text(encoding="utf-8")
@@ -81,9 +82,9 @@ def ensure_user_cfg_language() -> bool:
         lines = content.splitlines()
         if lines and lines[-1].strip():
             lines.append("")
-        lines.append(language_line)
+        lines.append(_LANGUAGE_SETTING)
         user_cfg_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        logger.info(f"Added '{language_line}' to user.cfg")
+        logger.info(f"Added '{_LANGUAGE_SETTING}' to user.cfg")
         return True
     except Exception as e:
         logger.exception(f"Failed to manage user.cfg at {user_cfg_path}: {e}")
