@@ -2,9 +2,26 @@
 
 > Upstream Smart Citizen history (0.1.x – 1.0.0) is in [UPSTREAM-HISTORY.md](UPSTREAM-HISTORY.md).
 
-## Status: Maintenance mode
+## Status: Active Development
 
-Open Strings is in maintenance mode as of v1.2.0. No new features are planned. The project will receive security and critical bug fixes only.
+Open Strings has returned to active development targeting Star Citizen 4.8.
+
+## 1.3.0 — Return to Active Development
+
+_Star Citizen 4.8 compatibility and new features._
+
+- [x] `Frontend_PU_Version` watermark written to `global.ini` on Apply — marks producing version and SC build
+- [x] `g_language` detection is now case-insensitive (`g_Language`, `G_LANGUAGE`, etc.)
+- [x] `os.path.normpath()` applied at all path-setting call sites in Config tab to prevent double-separator paths
+- [x] "Preview Merge" renamed to "Preview Apply" throughout Config tab UI
+- [x] Apply dialog shows per-category enhancement counts
+- [x] `should_autosave_user_ini()` guard — suppresses unnecessary `user.ini` writes when nothing changed
+- [x] Blueprint scanner widened to full `blueprintrewards/` subtree for SC 4.8 compatibility
+- [x] Versioned lookup cache to invalidate stale generator caches across SC releases
+- [x] DataForge diff-cache (`dataforge_diff.py`) — SHA-256 snapshot manifest; enhancement generators skip unchanged categories
+- [x] DataForge cache relocated to `%LOCALAPPDATA%\Open Strings\<channel>\cache\dataforge` (outside OneDrive scope)
+- [x] `dataforge_patcher.py` switched from `xml.etree.ElementTree` to `lxml.etree`
+- [x] Python 3.12 `shutil.rmtree` onexc compat fix
 
 ## 1.2.0 — Upstream v1.3.0 port + code quality
 

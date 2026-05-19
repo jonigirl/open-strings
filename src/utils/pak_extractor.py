@@ -12,9 +12,12 @@ import threading
 import time
 from pathlib import Path
 
+from src.utils.dataforge_diff import update_manifest
 from src.utils.perf import timed
 
 logger = logging.getLogger(__name__)
+
+_RMTREE_CB_KWARG = "onexc" if sys.version_info >= (3, 12) else "onerror"
 
 # Track active subprocesses by Python thread-id so they can be killed
 # from the main thread when the app closes mid-extraction.
@@ -42,10 +45,9 @@ def _robust_rmtree(path: Path, attempts: int = 6) -> None:
     if not path.exists():
         return
 
-    def _onexc(func, target, exc_info):
-        # Python 3.12 onexc callback: clear the read-only bit and retry the
-        # single failing file/dir. For other errors (e.g. lingering handle),
-        # propagate so the outer retry loop picks it up.
+    def _onexc(func, target, *_):
+        # Compat shim: accepts both Python 3.12 (onexc) and ≤3.11 (onerror)
+        # callback signatures. Clear the read-only bit and retry.
         try:
             os.chmod(target, stat.S_IWRITE)
         except OSError:
@@ -59,7 +61,7 @@ def _robust_rmtree(path: Path, attempts: int = 6) -> None:
     for i in range(attempts):
         try:
             gc.collect()  # drop any lingering XML file handles we own
-            shutil.rmtree(path, onexc=_onexc)
+            shutil.rmtree(path, **{_RMTREE_CB_KWARG: _onexc})
             return
         except OSError as e:
             last_err = e
@@ -446,6 +448,16 @@ def extract_dataforge(
         stamp = dataforge_cache_dir / ".p4k_mtime"
         stamp.write_text(str(p4k_path.stat().st_mtime))
         logger.info(f"DataForge cache written to {dataforge_cache_dir}")
+
+        # Snapshot the new cache so the next run can diff against it.
+        # SHA-256 over ~28k files is multi-minute serial; we surface it
+        # to the progress bar via progress_pct_callback.
+        logger.info("Snapshotting DataForge cache for diff manifest…")
+        update_manifest(
+            raw_dir / "libs",
+            progress_callback=progress_pct_callback,
+        )
+        logger.info("Diff manifest written")
 
     # Ensure all file handles are released before returning
     gc.collect()

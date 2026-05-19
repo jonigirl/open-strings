@@ -723,9 +723,51 @@ class AppSettings:
         return get_tools_dir() / "unforge.cli.exe"
 
     @staticmethod
+    def migrate_dataforge_cache_to_local() -> None:
+        r"""One-shot move of the DataForge XML cache from Documents → AppData\Local.
+
+        Idempotent: no-ops when the old path is already absent. If the new
+        location already exists the old directory is simply cleaned up.
+        """
+        import os
+        import shutil
+
+        old_dir = AppSettings.get_cache_dir() / "dataforge"
+        local_appdata = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
+        new_dir = local_appdata / "Open Strings" / AppSettings.get_active_channel() / "cache" / "dataforge"
+
+        if not old_dir.exists():
+            return
+
+        if new_dir.exists():
+            logger.info(f"DataForge cache already at new location; removing old copy at {old_dir}")
+            try:
+                shutil.rmtree(old_dir, ignore_errors=True)
+            except Exception as e:
+                logger.warning(f"Could not remove old DataForge cache at {old_dir}: {e}")
+            return
+
+        logger.info(f"Migrating DataForge cache: {old_dir} → {new_dir}")
+        try:
+            new_dir.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(old_dir), str(new_dir))
+            logger.info("DataForge cache migration complete.")
+        except Exception as e:
+            logger.warning(f"Could not migrate DataForge cache: {e}")
+
+    @staticmethod
     def get_dataforge_cache_dir() -> Path:
-        """Return the directory where DataForge entity XMLs are cached after unforge."""
-        return AppSettings.get_cache_dir() / "dataforge"
+        """Return the directory where DataForge entity XMLs are cached after unforge.
+
+        Stored under AppData\\Local (not Documents) so the ~1.4 GB XML tree
+        stays outside the OneDrive sync scope.
+        """
+        import os
+
+        local_appdata = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
+        cache_dir = local_appdata / "Open Strings" / AppSettings.get_active_channel() / "cache" / "dataforge"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return cache_dir
 
     @staticmethod
     def get_p4k_path() -> Path:

@@ -58,6 +58,7 @@ All pytest settings (timeout, coverage, markers) are configured in `pyproject.to
 | `test_user_ini_manager.py`              | User INI read/write                                                                          |
 | `test_version.py`                       | Version string parsing                                                                       |
 | `test_workers.py`                       | Qt worker thread signal contracts                                                            |
+| `test_frontend_version_stamp.py`        | `Frontend_PU_Version` watermark behaviour (11 tests)                                         |
 
 ### Markers
 
@@ -166,7 +167,7 @@ uv run python src/main.py
 
 Coverage is measured automatically on every test run. GUI files (`main_window.py`, `config_tab.py`, etc.) are excluded — they are covered by the manual test plan in `TESTPLAN.md`.
 
-### Current coverage (as of v1.1.2)
+### Current coverage (as of v1.3.0)
 
 | Component               | Coverage | Notes                                                         |
 | ----------------------- | -------- | ------------------------------------------------------------- |
@@ -177,7 +178,7 @@ Coverage is measured automatically on every test run. GUI files (`main_window.py
 | `overrides_manager.py`  | 100%     |                                                               |
 | `pak_extractor.py`      | 55%      | GUI-driven extraction paths not reachable without a real P4K  |
 | `updater.py`            | 97%      |                                                               |
-| **Overall (non-GUI)**   | **84%**  | Floor enforced at 65% via `--cov-fail-under`; 446 tests       |
+| **Overall (non-GUI)**   | **81%**  | Floor enforced at 65% via `--cov-fail-under`; 516 tests       |
 
 Coverage is uploaded as a `coverage.xml` artifact on every CI run (30-day retention).
 

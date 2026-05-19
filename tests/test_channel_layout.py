@@ -110,10 +110,11 @@ class TestChannelScopedPaths:
         ini_path = AppSettings.get_user_ini_path()
         assert ini_path == fake_user_data_dir / "LIVE" / "user.ini"
 
-    def test_dataforge_cache_dir_nests_under_active_channel(self, isolated_qsettings, fake_user_data_dir):
+    def test_dataforge_cache_dir_nests_under_active_channel(self, isolated_qsettings, tmp_path, monkeypatch):
+        monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
         AppSettings.set_active_channel("TECH-PREVIEW")
         df = AppSettings.get_dataforge_cache_dir()
-        assert df == fake_user_data_dir / "TECH-PREVIEW" / "cache" / "dataforge"
+        assert df == tmp_path / "Open Strings" / "TECH-PREVIEW" / "cache" / "dataforge"
 
     def test_switching_channel_changes_all_paths(self, isolated_qsettings, fake_user_data_dir):
         """Critical contract: every path helper tracks get_active_channel()."""

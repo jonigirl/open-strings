@@ -10,6 +10,7 @@ from PyQt6.QtCore import QModelIndex, QThread, pyqtSignal
 from PyQt6.QtGui import QColor, QMouseEvent
 from PyQt6.QtWidgets import QLabel, QProgressBar, QProgressDialog, QStyledItemDelegate, QStyleOptionViewItem, QWidget
 
+from src.utils.dataforge_diff import dirty_categories
 from src.utils.settings import AppSettings
 
 logger = logging.getLogger(__name__)
@@ -246,6 +247,31 @@ class EnhancementsGeneratorWorker(QThread):
 
             base_ini = AppSettings.get_cache_dir() / "base.ini"
             forge_dir = AppSettings.get_dataforge_cache_dir()
+
+            # ── Diff-cache check ──────────────────────────────────────────────
+            # Compare the current DataForge XMLs against the last-run manifest.
+            # None  → no manifest yet, run everything.
+            # set() → nothing changed, skip entirely.
+            # {...} → only re-run the categories whose source XMLs changed.
+            libs_dir = forge_dir / "raw" / "libs"
+            diff = dirty_categories(libs_dir)
+            # If enhancement files are missing, force regeneration even if the
+            # manifest says nothing changed — the manifest may have been written
+            # before enhancements were ever successfully generated.
+            if diff is not None and not diff:
+                cache_dir = AppSettings.get_cache_dir()
+                missing = [name for name in AppSettings.ENHANCEMENTS_FILES.values() if not (cache_dir / name).exists()]
+                if missing:
+                    sample = ", ".join(missing[:3])
+                    ellipsis = "…" if len(missing) > 3 else ""
+                    logger.info(
+                        f"Diff-cache: manifest clean but {len(missing)} enhancement "
+                        f"file(s) missing ({sample}{ellipsis}), forcing regeneration."
+                    )
+                    diff = None  # None = treat as first run, regenerate everything
+            if diff is not None:
+                self.categories = diff  # empty = skip all; non-empty = subset
+            # ─────────────────────────────────────────────────────────────────
 
             # Re-apply DataForge patches before generation. apply_patches is
             # idempotent: already-patched files are a cheap no-op, so running

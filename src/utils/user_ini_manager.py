@@ -10,6 +10,34 @@ from src.utils.perf import timed
 logger = logging.getLogger(__name__)
 
 
+def should_autosave_user_ini(entries: list[StringEntry], user_ini_path: Path) -> bool:
+    """Return False when writing would replace non-empty on-disk content with nothing.
+
+    Prevents wiping persisted edits when the app is closed before any entry
+    has been modified in this session (e.g. instant-exit during background load).
+
+    Returns True in all other cases:
+    - Any entry is modified → write (real edits to persist)
+    - user.ini doesn't exist → write (nothing to lose)
+    - user.ini is empty/zero-size → write (already blank, safe)
+    """
+    if any(e.is_modified for e in entries):
+        return True
+    try:
+        size = user_ini_path.stat().st_size
+    except FileNotFoundError:
+        return True
+    if size > 0:
+        logger.warning(
+            "Skipping autosave: no modified entries but %s has %d bytes — "
+            "avoiding overwrite of pre-existing user edits",
+            user_ini_path,
+            size,
+        )
+        return False
+    return True
+
+
 @timed
 def save_user_ini(entries: list[StringEntry], user_ini_path: Path) -> int:
     """Write only user-modified entries to user.ini.

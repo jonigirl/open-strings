@@ -2,6 +2,7 @@
 
 import logging
 import os
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
@@ -24,6 +25,8 @@ from src.gui.theme import AVAILABLE_THEMES, THEME_DARK, THEME_LIGHT, THEME_OS_DA
 from src.utils.settings import AppSettings
 
 logger = logging.getLogger(__name__)
+
+ENHANCEMENTS_SRC = "enhancements"
 
 
 class ConfigTab(QWidget):
@@ -115,7 +118,8 @@ class ConfigTab(QWidget):
 
         game_input_layout = QHBoxLayout()
         self.game_path_input = QLineEdit()
-        self.game_path_input.setText(AppSettings.get_sc_install_root())
+        _initial_game_root = AppSettings.get_sc_install_root()
+        self.game_path_input.setText(os.path.normpath(_initial_game_root) if _initial_game_root else "")
         self.game_path_input.setPlaceholderText(r"C:\Program Files\Roberts Space Industries\StarCitizen")
         self.game_path_input.setToolTip(
             "Star Citizen install root — the directory that contains LIVE/, "
@@ -176,7 +180,7 @@ class ConfigTab(QWidget):
 
         data_input_layout = QHBoxLayout()
         self.data_dir_input = QLineEdit()
-        self.data_dir_input.setText(str(AppSettings.get_user_data_dir()))
+        self.data_dir_input.setText(os.path.normpath(str(AppSettings.get_user_data_dir())))
         self.data_dir_input.setToolTip(
             "Open Strings app data root. Each channel gets its own subfolder "
             r"inside this directory. Leave blank or click Reset to use Documents\Open Strings."
@@ -251,7 +255,7 @@ class ConfigTab(QWidget):
         import_btn.clicked.connect(self.import_ini_requested.emit)
         button_layout.addWidget(import_btn)
 
-        preview_btn = QPushButton("Preview Merge")
+        preview_btn = QPushButton("Preview Apply")
         preview_btn.setMaximumWidth(150)
         preview_btn.clicked.connect(self.preview_merge)
         button_layout.addWidget(preview_btn)
@@ -305,6 +309,13 @@ class ConfigTab(QWidget):
         """Save the SC install root when editing finishes, and refresh the
         channel combo so per-channel enable/disable reflects the new root."""
         game_path = self.game_path_input.text().strip()
+        if game_path:
+            # Normalize to native separators (backslashes on Windows). Qt's
+            # QFileDialog returns POSIX-style forward slashes and Path.resolve()
+            # also yields forward slashes in some flows; without this the field
+            # toggles between styles depending on how the path arrived.
+            game_path = os.path.normpath(game_path)
+            self.game_path_input.setText(game_path)
         if game_path and not Path(game_path).exists():
             logger.warning(f"SC install root does not exist: {game_path}")
             return
@@ -355,7 +366,7 @@ class ConfigTab(QWidget):
             self.data_dir_input.setText(str(current_dir))
             return
 
-        self.data_dir_input.setText(str(new_dir))
+        self.data_dir_input.setText(os.path.normpath(str(new_dir)))
         if new_dir != current_dir:
             logger.info(f"Open Strings data folder changed: {current_dir} → {new_dir}")
             self._refresh_p4k_status()
@@ -372,7 +383,7 @@ class ConfigTab(QWidget):
         current_dir = AppSettings.get_user_data_dir()
         AppSettings.set_user_data_dir(None)
         new_dir = AppSettings.get_user_data_dir()
-        self.data_dir_input.setText(str(new_dir))
+        self.data_dir_input.setText(os.path.normpath(str(new_dir)))
         if new_dir != current_dir:
             logger.info(f"Open Strings data folder reset to default: {new_dir}")
             self._refresh_p4k_status()
@@ -510,22 +521,38 @@ class ConfigTab(QWidget):
             from src.utils.settings import AppSettings as _AS
 
             source_counts: dict[str, int] = {}
+            # Per-category counter for the enhancements source so we can
+            # mirror the Apply-to-game dialog's breakdown.
+            enhancement_categories: Counter[str] = Counter()
             for entry in entries:
                 contributing = _AS.SOURCE_USER if entry.custom_value else entry.source_file
                 source_counts[contributing] = source_counts.get(contributing, 0) + 1
+                if contributing == ENHANCEMENTS_SRC:
+                    enhancement_categories[entry.category] += 1
 
-            text = "Merge Preview\n\nMerge Order (top to bottom):\n"
-            for i, name in enumerate(hierarchy, 1):
-                text += f"  {i}. {name.capitalize()} ({source_counts.get(name, 0)} keys)\n"
+            text = "Apply Preview\n\nMerge Order (top to bottom):\n"
+            visible_index = 0
+            for name in hierarchy:
+                count = source_counts.get(name, 0)
+                if count == 0:
+                    continue
+                visible_index += 1
+                if name == ENHANCEMENTS_SRC:
+                    text += f"  {visible_index}. Open Strings Enhancements ({count:,} keys total):\n"
+                    if enhancement_categories:
+                        for cat, ccount in enhancement_categories.most_common():
+                            text += f"       {cat}: {ccount:,}\n"
+                else:
+                    text += f"  {visible_index}. {name.capitalize()} ({count:,} keys)\n"
 
-            text += f"\nTotal Keys: {len(entries)}\nStatus Breakdown:\n"
+            text += f"\nTotal Keys: {len(entries):,}\nStatus Breakdown:\n"
             status_counts: dict[str, int] = {}
             for entry in entries:
                 status_counts[entry.status] = status_counts.get(entry.status, 0) + 1
-            for status, count in status_counts.items():
-                text += f"  {status}: {count}\n"
+            for status, count in sorted(status_counts.items(), key=lambda kv: -kv[1]):
+                text += f"  {status}: {count:,}\n"
 
-            QMessageBox.information(self, "Merge Preview", text)
+            QMessageBox.information(self, "Apply Preview", text)
 
         except Exception as e:
             logger.exception(f"Error previewing merge: {e}")

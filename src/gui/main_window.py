@@ -4,6 +4,7 @@ import html as _html_mod
 import logging
 import os
 import re as _re_mod
+from collections import Counter
 from pathlib import Path
 
 from PyQt6.QtCore import QModelIndex, Qt, QTimer, QUrl, pyqtSlot
@@ -78,6 +79,34 @@ logger = logging.getLogger(__name__)
 _EM3_RE = _re_mod.compile(r"&lt;EM3&gt;(.*?)&lt;/EM3&gt;", _re_mod.DOTALL)
 _EM4_RE = _re_mod.compile(r"&lt;EM4&gt;(.*?)&lt;/EM4&gt;", _re_mod.DOTALL)
 _MISSION_TOKEN_RE = _re_mod.compile(r"~mission\(([^|)]+)(?:\|[^)]*)?\)")
+
+# Frontend version chip (main-menu watermark). CIG ships a key called
+# ``Frontend_PU_Version`` whose value the main menu renders verbatim.
+# We append " | Localizations Enhanced with Open Strings vX.Y.Z" so
+# users (and their screenshots / support tickets) can see at a glance
+# that the localization has been customized. Idempotency: the stamp RE
+# strips any prior watermark before re-appending, so successive applies
+# and version bumps don't accumulate suffixes. Skipped silently when
+# the key isn't in merged_dict.
+_FRONTEND_VERSION_KEY = "Frontend_PU_Version"
+_FRONTEND_VERSION_STAMP_RE = _re_mod.compile(
+    r"\s*\|\s*(?:Localizations Enhanced (?:with|by)|Enhanced with <3 by)\s+Open Strings\s+v?[^\s|]+\s*$",
+    _re_mod.IGNORECASE,
+)
+
+
+def _stamp_frontend_version(merged: dict) -> dict:
+    """Append the Open Strings watermark to Frontend_PU_Version in place.
+
+    Skips entirely if the key is not present in *merged* — we don't
+    fabricate the key when stock doesn't have it. Mutates and returns
+    *merged*.
+    """
+    if _FRONTEND_VERSION_KEY not in merged:
+        return merged
+    base = _FRONTEND_VERSION_STAMP_RE.sub("", merged[_FRONTEND_VERSION_KEY]).rstrip()
+    merged[_FRONTEND_VERSION_KEY] = f"{base} | Localizations Enhanced with Open Strings v{get_version()}"
+    return merged
 
 
 def _render_preview_html(key: str, raw: str) -> str:
@@ -677,6 +706,11 @@ class MainWindow(QMainWindow):
             # Merge all sources in hierarchy order, with user edits on top
             merged_dict = merge_sources_by_hierarchy(sources_dict, hierarchy, user_overrides_dict)
 
+            # Stamp the main-menu version chip so the game shows that
+            # Open Strings is active. Idempotent across re-applies and
+            # version bumps; skipped if stock doesn't ship the key.
+            merged_dict = _stamp_frontend_version(merged_dict)
+
             # Get a base file to use for structure preservation
             # Use the first source file from hierarchy
             base_file = None
@@ -746,8 +780,11 @@ class MainWindow(QMainWindow):
 
             user_count = save_user_ini(self.entries, AppSettings.get_user_ini_path())
 
-            # Count enhancement entries
-            enhancement_count = sum(1 for entry in self.entries if entry.source_file == "enhancements")
+            # Count enhancement entries, broken down by category.
+            enhancement_categories: Counter[str] = Counter(
+                entry.category for entry in self.entries if entry.source_file == "enhancements"
+            )
+            enhancement_count = sum(enhancement_categories.values())
 
             # Ensure user.cfg has language setting
             from src.utils.user_cfg import ensure_user_cfg_language
@@ -758,10 +795,15 @@ class MainWindow(QMainWindow):
             self._status_bar().showMessage(
                 f"Applied to game | {user_count} user edits | {enhancement_count} enhancements"
             )
+            if enhancement_categories:
+                breakdown = "\n".join(f"    {cat}: {count:,}" for cat, count in enhancement_categories.most_common())
+                enhancement_block = f"  Open Strings enhancements ({enhancement_count:,} total):\n{breakdown}"
+            else:
+                enhancement_block = "  Open Strings enhancements: 0"
             QMessageBox.information(
                 self,
                 "Success",
-                f"Applied to {target_path}\n\n  User edits: {user_count}\n  Enhancements: {enhancement_count}",
+                f"Applied to {target_path}\n\n  User edits: {user_count}\n{enhancement_block}",
             )
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to apply to game: {e}")
@@ -2476,9 +2518,11 @@ class MainWindow(QMainWindow):
         # Auto-save overrides if there are unsaved edits
         if self.entries and not (self._loader_worker and self._loader_worker.isRunning()):
             try:
-                from src.utils.user_ini_manager import save_user_ini
+                from src.utils.user_ini_manager import save_user_ini, should_autosave_user_ini
 
-                save_user_ini(self.entries, AppSettings.get_user_ini_path())
+                user_ini_path = AppSettings.get_user_ini_path()
+                if should_autosave_user_ini(self.entries, user_ini_path):
+                    save_user_ini(self.entries, user_ini_path)
             except Exception as e:
                 logger.error(f"Failed to auto-save overrides on exit: {e}")
 

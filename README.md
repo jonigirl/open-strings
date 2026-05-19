@@ -2,8 +2,6 @@
 
 _Customize Star Citizen's localization strings._
 
-> **Maintenance mode** — v1.2.0 is the final feature release. Security and critical bug fixes only.
-
 ## Fork notice
 
 Open Strings is a fork of [Smart Citizen by Osiris DevWorks](https://github.com/Osiris-DevWorks/smart-citizen), modified by Joni Hayes. Distributed under GPL-3.0-only.

@@ -106,6 +106,38 @@ def write_ini(path: Path, entries: dict[str, str]) -> None:
 # by pak_extractor.py. When DataForge is re-extracted, the stamp changes and
 # the cache is invalidated automatically.
 
+# Per-cache builder version. Bump the value whenever the builder for that
+# cache changes its WHAT-it-collects semantics (new source dirs, schema
+# additions, etc.) so existing pickled results from before the change get
+# detected as stale and rebuilt — the .p4k_mtime fingerprint alone can't
+# catch this because the underlying DataForge data hasn't changed, only
+# our parsing of it has.
+#
+# History:
+#   blueprint_pools v2 (1.3.1) — walks all crafting/blueprintrewards/
+#     subdirs (was: only blueprintmissionpools/). Adds ~40 new pool
+#     records that 4.8 PTU references via 48blueprints/ + a new
+#     xenothreat2rewards/ dir.
+#   blueprint_pools v3 (1.3.1) — fallback name from blueprint XML
+#     filename when the entityClass UUID isn't __ref'd anywhere in
+#     the cache (PTU WIP state — blueprints shipped ahead of their
+#     entity records, e.g. fuel-nozzle blueprints in 4.8). Without
+#     this the pool's names list ended up empty and the entire pool
+#     was dropped, swallowing the [BP?] tag for those missions.
+#   blueprint_pools v4 (1.3.1) — entity_names_by_filename (stem →
+#     display name) tier added to build_blueprint_pool_lookup so
+#     blueprint records whose entityClass __ref is absent can still
+#     resolve via the blueprint XML's own stem key, giving a name
+#     match even when the fallback name differs from the entity's
+#     display name.
+#   scitem_lookups v2 (1.3.1) — emits entity_names_by_filename
+#     (xml_file.stem.lower() → display name) as a third return value;
+#     enables build_blueprint_pool_lookup's filename-stem tier.
+_LOOKUP_VERSIONS: dict[str, str] = {
+    "blueprint_pools": "v4",
+    "scitem_lookups": "v2",
+}
+
 
 def _dataforge_cache_key(forge_dir: Path) -> str:
     """Return a stable fingerprint for the current DataForge cache.
@@ -129,21 +161,25 @@ def _dataforge_cache_key(forge_dir: Path) -> str:
 def _cached_lookup(forge_dir: Path, name: str, builder):
     """Memoize *builder*'s output to cache/dataforge/.lookups/{name}.pkl.
 
-    The cache is invalidated when _dataforge_cache_key() changes. On cache
-    hit the pickled result is returned; on miss we call builder() and write
-    the result back. Pickle errors silently fall back to rebuilding.
+    Cache key is ``{builder_version}:{dataforge_fingerprint}``. Either side
+    changing invalidates the cache: re-extracting Data.p4k changes the
+    fingerprint; updating the builder's collection logic bumps the version
+    in _LOOKUP_VERSIONS. Pickle errors silently fall back to rebuilding.
     """
     cache_dir = forge_dir / ".lookups"
     cache_file = cache_dir / f"{name}.pkl"
-    key = _dataforge_cache_key(forge_dir)
+    builder_version = _LOOKUP_VERSIONS.get(name, "v1")
+    key = f"{builder_version}:{_dataforge_cache_key(forge_dir)}"
 
     if cache_file.exists():
         try:
             with cache_file.open("rb") as f:
                 stored_key, value = pickle.load(f)
             if stored_key == key:
-                logger.info(f"Lookup cache hit: {name}")
+                logger.info(f"Lookup cache hit: {name} ({builder_version})")
                 return value
+            else:
+                logger.info(f"Lookup cache invalidated: {name} (stored={stored_key!r}, expected={key!r})")
         except (pickle.PickleError, OSError, EOFError, ValueError):
             pass
 
@@ -1411,10 +1447,39 @@ def enhancements_mission(root: ET.Element, reputation_lookup: dict[str, int] | N
     return "\\n".join(lines) if lines else ""
 
 
+def _name_from_blueprint_filename(bp_xml: Path) -> str:
+    """Best-effort fallback display name from a blueprint XML's filename.
+
+    Used when the blueprint's entityClass UUID isn't resolvable in the
+    entity_names lookup (CIG sometimes ships blueprint references ahead
+    of the entity definitions in PTU patches). The result isn't pretty
+    but it's recognisable enough for users to know what reward category
+    a mission pays — much better than dropping the whole BP tag.
+
+    Examples:
+        bp_craft_nozzle_fuelgiver_grin_nozzlefast.xml
+            → "Nozzle Fuelgiver Grin Nozzlefast"
+        bp_craft_salvage_modifier_scraper_large.xml
+            → "Salvage Modifier Scraper Large"
+        bp_rewards_eckhartsecuritykillnpcboss.xml
+            → "Eckhartsecuritykillnpcboss"
+    """
+    stem = bp_xml.stem
+    # Strip common prefixes — bp_craft_, bp_rewards_, bp_ — so the
+    # surfaced part is the descriptive tail.
+    for prefix in ("bp_craft_", "bp_rewards_", "bp_"):
+        if stem.startswith(prefix):
+            stem = stem[len(prefix) :]
+            break
+    # Replace separators with spaces and title-case.
+    return stem.replace("_", " ").replace("-", " ").title()
+
+
 def build_blueprint_pool_lookup(
     pool_dir: Path,
     bp_dir: Path,
     entity_names: dict[str, str],
+    entity_names_by_filename: dict[str, str] | None = None,
 ) -> dict[str, list[str]]:
     """Build mapping of blueprint pool UUID → list of craftable item display names.
 
@@ -1422,6 +1487,9 @@ def build_blueprint_pool_lookup(
         pool_dir: Directory containing BlueprintPoolRecord XMLs (blueprintmissionpools)
         bp_dir: Directory containing CraftingBlueprintRecord XMLs (blueprints/crafting)
         entity_names: UUID → display name lookup for resolving crafted item entities
+        entity_names_by_filename: xml_file.stem.lower() → display name, second-tier
+            fallback for blueprints whose entityClass UUID is absent from entity_names.
+            Pass None to skip this tier (e.g. when called outside the main pipeline).
 
     Returns:
         Dict mapping pool __ref UUID → sorted list of item display names
@@ -1429,18 +1497,30 @@ def build_blueprint_pool_lookup(
     if not pool_dir.exists() or not bp_dir.exists():
         return {}
 
-    # Index all blueprint files by __ref UUID → entityClass UUID
-    bp_entity: dict[str, str] = {}
+    # Index all blueprint files by __ref UUID → (entityClass UUID, fallback name).
+    # Fallback name is derived from the blueprint XML filename so that pools
+    # whose entityClass UUIDs CIG hasn't shipped yet (common in PTU — the
+    # blueprint refs land before the entity definitions in some patches,
+    # e.g. 4.8 fuel-nozzle blueprints reference UUIDs that aren't __ref'd
+    # anywhere in the extracted cache) can still produce a readable name
+    # for the POTENTIAL BLUEPRINTS block. Without the fallback the entire
+    # pool was silently dropped, the contract-gen scan saw "pool not in
+    # blueprint_pools dict", and the mission's [BP?] tag never fired.
+    entity_names_by_filename = entity_names_by_filename or {}
+    bp_entity: dict[str, tuple[str, str, str]] = {}
     for xml_file in bp_dir.rglob("*.xml"):
         try:
             root = ET.parse(xml_file).getroot()
             ref = root.get("__ref", "")
             if not ref:
                 continue
+            entity_class = ""
             for elem in root.iter():
                 if _poly_type(elem) == "CraftingProcess_Creation":
-                    bp_entity[ref] = elem.get("entityClass", "")
+                    entity_class = elem.get("entityClass", "")
                     break
+            stem_key = xml_file.stem.lower()
+            bp_entity[ref] = (entity_class, stem_key, _name_from_blueprint_filename(xml_file))
         except ET.ParseError:
             continue
 
@@ -1456,11 +1536,27 @@ def build_blueprint_pool_lookup(
             for elem in root.iter("BlueprintReward"):
                 bp_ref = elem.get("blueprintRecord", "")
                 if bp_ref and bp_ref in bp_entity:
-                    entity_ref = bp_entity[bp_ref]
+                    entity_ref, stem_key, fallback_name = bp_entity[bp_ref]
                     if entity_ref in entity_names:
+                        # Tier 1 — UUID match via entityClass attribute.
                         name = entity_names[entity_ref]
-                        if name not in names:
-                            names.append(name)
+                    elif stem_key in entity_names_by_filename:
+                        # Tier 2 — filename stem match. Handles cases where
+                        # CIG ships a blueprint XML whose entityClass UUID
+                        # isn't in entity_names (e.g. late-arriving entity
+                        # defs in PTU), but whose XML stem is already
+                        # indexed by build_scitem_lookups. More reliable
+                        # than the filename-derived title fallback below
+                        # because this still uses the real localised name.
+                        name = entity_names_by_filename[stem_key]
+                    else:
+                        # Tier 3 — filename-derived fallback (title-cased
+                        # stem). Least accurate but ensures the pool still
+                        # resolves to *something* readable rather than being
+                        # silently dropped.
+                        name = fallback_name
+                    if name and name not in names:
+                        names.append(name)
             if names:
                 pool_items[pool_uuid] = sorted(names)
         except ET.ParseError:
@@ -2705,13 +2801,16 @@ def build_ammo_lookup(ammo_dir: Path) -> dict[str, ET.Element]:
 def build_scitem_lookups(
     scitem_dir: Path,
     loc: dict[str, str] | None = None,
-) -> tuple[dict[str, tuple[str, str]], dict[str, str]]:
-    """Single-pass scan of scitem XMLs that produces two lookups:
+) -> tuple[dict[str, tuple[str, str]], dict[str, str], dict[str, str]]:
+    """Single-pass scan of scitem XMLs that produces three lookups:
 
     * mag_lookup: magazine entity class name → (ammoParamsRecord, maxAmmoCount)
       — derived from SAmmoContainerComponentParams elements.
     * entity_names: __ref UUID → display name (resolved via loc)
       — first @-prefixed Name attribute on any element.
+    * entity_names_by_filename: xml_file.stem.lower() → display name
+      — second-tier resolution for build_blueprint_pool_lookup when a
+      blueprint's entityClass UUID is absent from entity_names.
 
     Walking the scitem tree once instead of twice (magazines + entity names
     used to iterate independently) cuts ~30s off the run since there are
@@ -2719,9 +2818,10 @@ def build_scitem_lookups(
     """
     mag_lookup: dict[str, tuple[str, str]] = {}
     entity_names: dict[str, str] = {}
+    entity_names_by_filename: dict[str, str] = {}
     loc = loc or {}
     if not scitem_dir.exists():
-        return mag_lookup, entity_names
+        return mag_lookup, entity_names, entity_names_by_filename
 
     null_uuid = "00000000-0000-0000-0000-000000000000"
     for xml_file in scitem_dir.rglob("*.xml"):
@@ -2733,7 +2833,8 @@ def build_scitem_lookups(
         ref = root.get("__ref", "")
         entity_name = root.tag.split(".")[-1] if "." in root.tag else xml_file.stem
         found_mag = False
-        found_name = ref == ""  # skip name lookup entirely if no __ref
+        found_name = False
+        resolved_display_name: str | None = None
 
         for elem in root.iter():
             if not found_mag and _poly_type(elem) == "SAmmoContainerComponentParams":
@@ -2746,17 +2847,22 @@ def build_scitem_lookups(
                 name_attr = elem.get("Name", "")
                 if name_attr and name_attr.startswith("@"):
                     loc_key = name_attr.lstrip("@")
-                    entity_names[ref] = loc.get(loc_key, loc_key)
+                    resolved_display_name = loc.get(loc_key, loc_key)
                     found_name = True
             if found_mag and found_name:
                 break
 
-    return mag_lookup, entity_names
+        if resolved_display_name is not None:
+            if ref:
+                entity_names[ref] = resolved_display_name
+            entity_names_by_filename[xml_file.stem.lower()] = resolved_display_name
+
+    return mag_lookup, entity_names, entity_names_by_filename
 
 
 def build_magazine_lookup(scitem_dir: Path) -> dict[str, tuple[str, str]]:
     """Back-compat wrapper around build_scitem_lookups — returns magazines only."""
-    mag_lookup, _ = build_scitem_lookups(scitem_dir)
+    mag_lookup, _, _ = build_scitem_lookups(scitem_dir)
     return mag_lookup
 
 
@@ -2962,6 +3068,7 @@ def main(
     fps_ammo: dict = {}
     mag_lookup: dict = {}
     entity_names: dict[str, str] = {}
+    entity_names_by_filename: dict[str, str] = {}
     controller_lookup: dict = {}
     armor_lookup: dict = {}
     reputation_lookup: dict[str, int] = {}
@@ -3023,8 +3130,12 @@ def main(
             logger.info(f"Vehicle ammo: {len(vehicle_ammo)} records, FPS ammo: {len(fps_ammo)} records")
             _tick("Built ammo lookups")
         if "scitem" in results:
-            mag_lookup, entity_names = results["scitem"]
-            logger.info(f"Magazine lookup: {len(mag_lookup)} entries, Entity names: {len(entity_names)} entries")
+            mag_lookup, entity_names, entity_names_by_filename = results["scitem"]
+            logger.info(
+                f"Magazine lookup: {len(mag_lookup)} entries, "
+                f"Entity names: {len(entity_names)} entries, "
+                f"Entity names by filename: {len(entity_names_by_filename)} entries"
+            )
             _tick("Built scitem lookups")
         if "controller" in results:
             controller_lookup = results["controller"]
@@ -3082,15 +3193,28 @@ def main(
             if not key.endswith("_SCItem"):
                 continue
             base_key = key[: -len("_SCItem")]
-            # Direct same-format propagation: item_DescXXX_*_SCItem → item_DescXXX_*
-            # This handles entities whose XML Localization points to the _SCItem variant
-            # (e.g. item_DescQDRV_ARCC_S03_Fissure_SCItem) while the merger picks the
-            # plain key (item_DescQDRV_ARCC_S03_Fissure) as the canonical winner.
-            # Without this, stats written to the _SCItem key are silently discarded.
-            if base_key not in out and base_key in loc:
-                stats_marker = ENHANCEMENT_SEPARATOR
-                if stats_marker in value:
-                    out[base_key] = loc[base_key] + value[value.index(stats_marker) :]
+            # Mirror to the bare-key variant (just strip `_SCItem`). CIG
+            # ships some components with BOTH `item_DescX_SCItem` and a bare
+            # `item_DescX` holding the same stock description — e.g. the S3
+            # Juno Starwerk and ARCCorp QDRVs on PTU 4.8 (Agni / Vesta /
+            # Fissure / Impulse). The game can render either key, and without
+            # this mirror the bare-key variant shows stock text with no
+            # annotations / stats / [CLASS-Sx-grade] tag. Done BEFORE the
+            # comp_types underscore-variant check below so both legacy
+            # siblings get propagated if both exist in stock.
+            if base_key in loc and base_key not in out:
+                if base_key.startswith("item_Desc"):
+                    base_value = loc[base_key]
+                    if ENHANCEMENT_SEPARATOR in value:
+                        out[base_key] = base_value + value[value.index(ENHANCEMENT_SEPARATOR) :]
+                    else:
+                        out[base_key] = value
+                elif base_key.startswith("item_Name"):
+                    tag_match = re.search(r"\s(\[[A-Z0-9\-]+\])\s*$", value)
+                    if tag_match:
+                        out[base_key] = f"{loc[base_key]} {tag_match.group(1)}"
+                    else:
+                        out[base_key] = value
                 else:
                     out[base_key] = value
                 sibling_count += 1
@@ -3260,13 +3384,30 @@ def main(
         logger.info(f"Finished missions scan ({len(out)} entries)")
         _tick("Scanned missions")
 
-        # Blueprint pool lookup (needs entity_names from Group A)
-        pool_dir = records / "crafting" / "blueprintrewards" / "blueprintmissionpools"
+        # Blueprint pool lookup (needs entity_names from Group A).
+        # Walk the parent `blueprintrewards/` directory so the rglob in
+        # build_blueprint_pool_lookup discovers ALL pool subdirectories,
+        # not just `blueprintmissionpools/`. CIG added two new sibling
+        # dirs in PTU 4.8 — `48blueprints/` (~40 mission-loot pools for
+        # hauling / courier / mercenary / mining / refueling / Foxwell /
+        # Headhunters families) and `xenothreat2rewards/` (Foxwell_X2
+        # mission rewards). Pre-fix, ~1400 BlueprintRewards references
+        # in PTU contract generators silently failed UUID resolution
+        # because the pool dicts didn't include those subdirs, and the
+        # corresponding mission titles never got [BP]/[BP?] tags. Pool
+        # XMLs in all subdirs share the same BlueprintPoolRecord schema,
+        # so the parser doesn't need any structural changes — just a
+        # wider scan root. `collectorwikelo/` is also a sibling subdir
+        # and its pools are now discoverable too (previously read via a
+        # separate path elsewhere; now fully indexed here as well).
+        pool_dir = records / "crafting" / "blueprintrewards"
         bp_dir = records / "crafting" / "blueprints" / "crafting"
         blueprint_pools = _cached_lookup(
             forge_dir,
             "blueprint_pools",
-            lambda: build_blueprint_pool_lookup(pool_dir, bp_dir, entity_names),
+            lambda: build_blueprint_pool_lookup(
+                pool_dir, bp_dir, entity_names, entity_names_by_filename=entity_names_by_filename
+            ),
         )
         _tick("Built blueprint pool lookup")
 

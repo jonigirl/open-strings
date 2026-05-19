@@ -54,6 +54,10 @@ def main():
         # Seed default settings on first launch if registry is empty.
         AppSettings.ensure_default_settings()
 
+        # Move DataForge XML cache from Documents → AppData\Local (idempotent).
+        # Runs after ensure_default_settings so get_active_channel() is settled.
+        AppSettings.migrate_dataforge_cache_to_local()
+
         # Always keep user source path in sync with canonical user.ini location
         AppSettings.set_source_path(AppSettings.SOURCE_USER, str(AppSettings.get_user_ini_path()))
 

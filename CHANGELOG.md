@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `Frontend_PU_Version` watermark written into `global.ini` on every Apply — marks which Open Strings version produced the file and stamps the SC build version alongside it
+- `src/utils/dataforge_diff.py` — diff-cache module: SHA-256 snapshot manifest for the DataForge XML cache; `update_manifest()` and `dirty_categories()` enable enhancement generators to skip unchanged categories on subsequent runs
+- DataForge cache directory relocated to `%LOCALAPPDATA%\Open Strings\<channel>\cache\dataforge` to keep the ~1.4 GB XML tree outside OneDrive sync scope; one-shot startup migration from the old Documents path
+- Apply dialog per-category enhancement breakdown (Ships, Components, etc.) with category counts
+- `should_autosave_user_ini()` guard — suppresses unnecessary `user.ini` writes when no entries changed and the on-disk file is non-empty
+- Blueprint scanner widened to include the full `blueprintrewards/` subtree for SC 4.8 compatibility
+- `_name_from_blueprint_filename()` helper resolves display names for blueprint reward files
+- `entity_names_by_filename` third return value from `build_scitem_lookups` for bare-key `_SCItem` mirror in component generation
+- `scripts/diff_mission_rewards_channels.py` — diagnostic script for comparing blueprint rewards channels across SC builds
+- Versioned lookup cache (`_LOOKUP_VERSIONS`) keyed by `"<version>:<fingerprint>"` to invalidate stale generator caches across SC releases
+- 11 new tests for `Frontend_PU_Version` watermark behaviour (`tests/test_frontend_version_stamp.py`)
+
+### Fixed
+
+- `g_language` key detection in `user_cfg.py` is now case-insensitive via regex (`g_Language`, `G_LANGUAGE`, etc. all matched correctly)
+- `os.path.normpath()` applied at all five path-setting call sites in `config_tab.py` to prevent double-separator paths on Windows
+- Enhancement generation worker now skips unchanged categories instead of always regenerating all — reduces unnecessary DataForge re-processing after clean extractions
+- DataForge extraction worker progress dialog now stays open across the extraction→enhancement handoff and closes correctly on failure
+
+### Changed
+
+- "Preview Merge" renamed to "Preview Apply" throughout the Config tab UI
+- "Smart Citizen Enhancements" label updated to "Open Strings Enhancements" in Apply dialog
+- Apply success dialog shows per-category enhancement counts via `collections.Counter`
+- `dataforge_patcher.py` switched from `xml.etree.ElementTree` to `lxml.etree` for XML processing
+- `shutil.rmtree` onexc callback uses a compat constant (`_RMTREE_CB_KWARG`) for Python 3.12 compatibility
+- `lxml >= 6.1.1` added as a dependency
+
 ## [1.2.0] - 2026-05-12
 
 ### Added

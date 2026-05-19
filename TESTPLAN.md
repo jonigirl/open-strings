@@ -2,7 +2,7 @@
 
 Focused on the UX and integration paths `pytest` can't reach. Automated coverage already exists for parsing/merging/missions/patcher/pak-filtering/channel layout/progress/StringTableModel — don't duplicate.
 
-**Before starting:** `uv run pytest tests/` must pass green (413+ tests, 88%+ coverage). Build a fresh installer and drive the tests below against that installer (not the dev checkout).
+**Before starting:** `uv run pytest tests/` must pass green (516+ tests, 65%+ coverage). Build a fresh installer and drive the tests below against that installer (not the dev checkout).
 
 ---
 

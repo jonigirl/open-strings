@@ -318,3 +318,30 @@
 - [ ] Apache 2.0 relicence and NOTICE file — not applicable; Open Strings is GPL-3.0-only
 - [ ] CI/CD pipeline (GitHub Actions, auto-release on merge to main, Discord notification) — held; solo project with manual releases
 - [ ] Major main-window refactor (~600-line extraction to helpers and workers) — not applicable; the modular split this was based on originated in Open Strings and was adapted back upstream in v1.3.0
+
+# v1.3.1 Smart Citizen — SC 4.8 BP Scanner + Diff Cache
+
+> Upstream commits reviewed up to `d2217d5` (2026-05-18).
+> Previous review marker: `f3412a8` (2026-05-10, v1.2.0 merge point).
+> Items marked **[ported]** were merged into Open Strings 1.3.0.
+> Items marked **[held]** were not ported; reasons noted.
+
+- [x] `os.path.normpath()` at all path-setting call sites in Config tab to prevent double-separator paths on Windows **[ported]**
+- [x] Case-insensitive `g_language` key detection via regex (`g_Language`, `G_LANGUAGE`, etc.) **[ported]**
+- [x] `should_autosave_user_ini()` guard — suppresses `user.ini` writes when no entries changed and the on-disk file is non-empty **[ported]**
+- [x] "Preview Merge" renamed to "Preview Apply" throughout Config tab UI **[ported]**
+- [x] Apply success dialog per-category enhancement counts via `collections.Counter` **[ported]**
+- [x] `visible_index` counter replacing fixed loop index in enhancement tab; zero-count categories skipped **[ported]**
+- [x] `Frontend_PU_Version` watermark written into `global.ini` on every Apply **[ported]**
+- [x] Blueprint scanner pool path widened from `blueprintmissionpools/` to full `blueprintrewards/` subtree for SC 4.8 **[ported]**
+- [x] `_name_from_blueprint_filename()` helper for display-name resolution from blueprint filenames **[ported]**
+- [x] `entity_names_by_filename` as third return value from `build_scitem_lookups`; bare-key `_SCItem` mirror in component generation **[ported]**
+- [x] Versioned `_LOOKUP_VERSIONS` dict to invalidate stale generator caches across SC releases **[ported]**
+- [x] `scripts/diff_mission_rewards_channels.py` — diagnostic for comparing blueprint reward channels **[ported]**
+- [x] Extraction→enhancement progress dialog now stays open across the handoff and closes correctly on failure **[ported]**
+- [x] DataForge diff-cache manifest (`dataforge_diff.py`): SHA-256 snapshot; `update_manifest()` / `dirty_categories()` enable generators to skip unchanged categories **[ported]**
+- [x] DataForge cache relocated to `%LOCALAPPDATA%\Open Strings\<channel>\cache\dataforge` (outside OneDrive scope) with one-shot startup migration **[ported]**
+- [x] `dataforge_patcher.py` switched from `xml.etree.ElementTree` to `lxml.etree` **[ported]**
+- [x] Python 3.12 `shutil.rmtree` onexc keyword-arg compat fix (`_RMTREE_CB_KWARG`) **[ported]**
+- [ ] Retired URL sources pruner — held; prereqs absent from this fork, revisit post-1.3.0 release
+- [ ] Bundle updated unp4k binaries — not applicable; Open Strings downloads tools at runtime
