@@ -178,7 +178,7 @@ Coverage is measured automatically on every test run. GUI files (`main_window.py
 | `overrides_manager.py`  | 100%     |                                                               |
 | `pak_extractor.py`      | 55%      | GUI-driven extraction paths not reachable without a real P4K  |
 | `updater.py`            | 97%      |                                                               |
-| **Overall (non-GUI)**   | **81%**  | Floor enforced at 65% via `--cov-fail-under`; 516 tests       |
+| **Overall (non-GUI)**   | **84%**  | Floor enforced at 80% via `--cov-fail-under`; 538 tests       |
 
 Coverage is uploaded as a `coverage.xml` artifact on every CI run (30-day retention).
 

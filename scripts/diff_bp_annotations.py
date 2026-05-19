@@ -94,7 +94,7 @@ def main() -> int:
         print("\n" + "=" * 80)
         print("KEYS NOT PRESENT IN 0.9.3 AT ALL:")
         print("=" * 80)
-        for k, tv in sorted(not_in_0_9_3):
+        for k, _tv in sorted(not_in_0_9_3):
             print(f"  {k}")
 
     return 0
