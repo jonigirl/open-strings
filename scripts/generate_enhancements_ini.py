@@ -1660,6 +1660,37 @@ def scan_contract_generators(
     templates_dir = contractgen_dir.parent / "contracttemplates"
     template_lookup = _build_template_lookup(templates_dir)
 
+    known_systems = {"Stanton", "Pyro", "Nyx", "Desert", "ArcCorp", "Crusader"}
+    # Intra-system region markers used by Headhunters / CFP / etc.
+    # to partition contracts within a single system (different pools
+    # per region). Matches ``RegionA``, ``RegionB1``, etc.
+    _region_token_re = re.compile(r"^Region[A-Z][0-9]*$")
+
+    def _extract_system(name: str, fallback: str) -> str:
+        """Pick system token(s) from *name*, else *fallback*.
+
+        Splits on both ``_`` and ``/`` to handle dual-system contract
+        debugNames like ``Shubin_RG_Discovery_ShipMining_Nyx/Stanton_Stileron``
+        (tokens = ..., ``Nyx/Stanton``, ...). When an intra-system
+        ``Region<X>`` token follows the system, append it so pools
+        that differ within a single system (e.g. Pyro RegionA vs
+        RegionC Headhunters contracts) get separate labels.
+        """
+        if not name:
+            return fallback
+        sys_token = None
+        region_token = None
+        for token in name.split("_"):
+            sub = token.split("/")
+            if sub and all(s in known_systems for s in sub):
+                sys_token = token
+                region_token = None  # reset — a later system wins
+            elif sys_token and _region_token_re.match(token):
+                region_token = token
+        if sys_token is None:
+            return fallback
+        return f"{sys_token} {region_token}" if region_token else sys_token
+
     try:
         for xml_file in contractgen_dir.rglob("*.xml"):
             try:
@@ -1673,37 +1704,6 @@ def scan_contract_generators(
                 (".//ContractGeneratorHandler_Career", ".//CareerContract"),
                 (".//ContractGeneratorHandler_List", ".//Contract"),
             ]
-
-            known_systems = {"Stanton", "Pyro", "Nyx", "Desert", "ArcCorp", "Crusader"}
-            # Intra-system region markers used by Headhunters / CFP / etc.
-            # to partition contracts within a single system (different pools
-            # per region). Matches ``RegionA``, ``RegionB1``, etc.
-            _region_token_re = re.compile(r"^Region[A-Z][0-9]*$")
-
-            def _extract_system(name: str, fallback: str) -> str:
-                """Pick system token(s) from *name*, else *fallback*.
-
-                Splits on both ``_`` and ``/`` to handle dual-system contract
-                debugNames like ``Shubin_RG_Discovery_ShipMining_Nyx/Stanton_Stileron``
-                (tokens = ..., ``Nyx/Stanton``, ...). When an intra-system
-                ``Region<X>`` token follows the system, append it so pools
-                that differ within a single system (e.g. Pyro RegionA vs
-                RegionC Headhunters contracts) get separate labels.
-                """
-                if not name:
-                    return fallback
-                sys_token = None
-                region_token = None
-                for token in name.split("_"):
-                    sub = token.split("/")
-                    if sub and all(s in known_systems for s in sub):
-                        sys_token = token
-                        region_token = None  # reset — a later system wins
-                    elif sys_token and _region_token_re.match(token):
-                        region_token = token
-                if sys_token is None:
-                    return fallback
-                return f"{sys_token} {region_token}" if region_token else sys_token
 
             for handler_xpath, contract_xpath in handler_configs:
                 for handler in root.findall(handler_xpath):
