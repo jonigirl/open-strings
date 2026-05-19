@@ -10,8 +10,7 @@ from src.models.string_model import StringEntry
 
 logger = logging.getLogger(__name__)
 
-# Number of columns in the row_values list built inside filter_entry_indices.
-# Category / Key / Default Value / Original Value / Fav-star / Custom Value / Status
+# Column count for the filter table: Category / Key / Default / Original / Star / Custom / Status
 _NUM_FILTER_COLUMNS = 7
 
 

@@ -220,7 +220,7 @@ def merge_ini_files(source_path: str | Path, overrides_dict: dict[str, str], out
 
                 # Strip comma-based metadata suffix (e.g., "key,P" → "key")
                 # This ensures keys from different sources match up correctly
-                clean_key = key_stripped.split(",")[0].strip()
+                clean_key = key_stripped.partition(",")[0].strip()
 
                 # Check if we have an override for this key (using clean key)
                 if clean_key in overrides_dict:

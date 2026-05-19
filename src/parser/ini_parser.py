@@ -9,6 +9,20 @@ from src.utils.perf import timed
 
 logger = logging.getLogger(__name__)
 
+# Maps enhancements file labels to the display category for their keys.
+# Used by load_sources_from_settings to tag enhancement entries with their
+# proper category so the UI can filter them independently.
+_ENHANCEMENTS_LABEL_CATEGORY: dict[str, str] = {
+    "ship_descs": "Ships",
+    "component_descs": "Ship Items",
+    "ship_weapon_descs": "Ship Items",
+    "fps_weapon_descs": "Gear",
+    "mission_rewards": "Missions",
+    "commodity_crafting": "Commodities",
+    "journal": "Journal",
+    "missile_enhancements": "Ship Items",
+}
+
 
 @timed
 def parse_ini_file(path: str | Path) -> dict[str, str]:
@@ -104,14 +118,9 @@ def load_source_files(
     filtered_hierarchy = [s for s in hierarchy if s in sources_dict]
     logger.info(f"Filtered hierarchy: {filtered_hierarchy}")
 
-    # Filter each source to only include relevant keys based on source type
     from src.utils.settings import AppSettings
 
-    filtered_sources = {}
-    for source_name in filtered_hierarchy:
-        source_data = sources_dict[source_name]
-
-        filtered_sources[source_name] = source_data
+    filtered_sources = {s: sources_dict[s] for s in filtered_hierarchy}
 
     # Separate user overrides from the base merge so we can correctly populate
     # custom_value and original_value independently.
