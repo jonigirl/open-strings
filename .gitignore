@@ -44,8 +44,11 @@ coverage_report.txt
 
 # Output
 output/
+output*.txt
+ruff_output.txt
 installer_output/
 build_output.txt
+sandbox-logs/
 *.bak
 *.tmp
 
