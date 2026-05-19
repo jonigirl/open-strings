@@ -6,7 +6,7 @@
 
 Open Strings has returned to active development targeting Star Citizen 4.8.
 
-## 1.3.0 — Return to Active Development
+## 1.3.0 — Return to Active Development ✓ Released 2026-05-20
 
 _Star Citizen 4.8 compatibility and new features._
 
