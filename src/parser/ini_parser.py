@@ -349,15 +349,6 @@ def load_overrides(target_path: str | Path) -> dict[str, str]:
     return parse_ini_file(target_path)
 
 
-def _determine_status(original_value: str, custom_value: str) -> str:
-    """Determine status of an entry (legacy, kept for compatibility)."""
-    if not custom_value:
-        return "Unmodified"
-    if custom_value != original_value:
-        return "Modified"
-    return "Unmodified"
-
-
 def _determine_status_from_source(source_name: str, base_source: str) -> str:
     """Determine status based on which source provided the value.
 

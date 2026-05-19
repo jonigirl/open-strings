@@ -3,8 +3,8 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from src.models.string_model import StringEntry
 from src.parser.ini_parser import (
-    _determine_status,
     _determine_status_from_source,
     load_overrides,
     load_source_files,
@@ -97,20 +97,20 @@ class TestLoadOverrides:
 
 
 # ---------------------------------------------------------------------------
-# _determine_status (legacy helper)
+# StringEntry._determine_status
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 class TestDetermineStatus:
     def test_no_custom_is_unmodified(self):
-        assert _determine_status("orig", "") == "Unmodified"
+        assert StringEntry._determine_status("orig", "") == "Unmodified"
 
     def test_custom_different_is_modified(self):
-        assert _determine_status("orig", "custom") == "Modified"
+        assert StringEntry._determine_status("orig", "custom") == "Modified"
 
     def test_custom_same_as_original_is_unmodified(self):
-        assert _determine_status("orig", "orig") == "Unmodified"
+        assert StringEntry._determine_status("orig", "orig") == "Unmodified"
 
 
 # ---------------------------------------------------------------------------
