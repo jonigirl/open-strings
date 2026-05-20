@@ -1765,6 +1765,7 @@ class MainWindow(QMainWindow):
         self._status_bar().addPermanentWidget(self._app_version_indicator)
 
     _SPINNER_FRAMES = ("◐", "◓", "◑", "◒")
+    _SPINNER_COLORS = ("#5BCEFA", "#F5A9B8", "#5BCEFA", "#F5A9B8")
 
     def _ensure_spinner(self) -> None:
         """Install a hidden spinner label in the status bar. Shown during long operations."""
@@ -1783,6 +1784,8 @@ class MainWindow(QMainWindow):
         if self._spinner_label is None:
             return
         self._spinner_frame = (self._spinner_frame + 1) % len(self._SPINNER_FRAMES)
+        color = self._SPINNER_COLORS[self._spinner_frame]
+        self._spinner_label.setStyleSheet(f"font-size: 20px; padding: 0px 4px; color: {color};")
         self._spinner_label.setText(self._SPINNER_FRAMES[self._spinner_frame])
 
     def start_spinner(self) -> None:
@@ -1790,6 +1793,7 @@ class MainWindow(QMainWindow):
         if self._spinner_label is None:
             return
         self._spinner_frame = 0
+        self._spinner_label.setStyleSheet(f"font-size: 20px; padding: 0px 4px; color: {self._SPINNER_COLORS[0]};")
         self._spinner_label.setText(self._SPINNER_FRAMES[0])
         self._spinner_label.setVisible(True)
         if self._spinner_timer is not None:
