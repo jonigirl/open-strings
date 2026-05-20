@@ -58,6 +58,40 @@ class TestResolvePatchesDir:
         result = _resolve_patches_dir()
         assert result.name == "patches"
 
+
+@pytest.mark.unit
+class TestDiffCategoryTranslation:
+    """DIFF_CATEGORY_TO_GENERATOR_KEYS must translate dirty_categories() output
+    into the vocabulary that generate_enhancements_ini._want() expects."""
+
+    def test_missions_maps_to_mission_rewards(self):
+        from src.utils.settings import AppSettings
+
+        result: set[str] = set()
+        for diff_key in {"missions"}:
+            result.update(AppSettings.DIFF_CATEGORY_TO_GENERATOR_KEYS.get(diff_key, [diff_key]))
+        assert result == {"mission_rewards"}
+
+    def test_all_diff_keys_produce_known_generator_keys(self):
+        from src.utils.settings import AppSettings
+
+        all_translated: set[str] = set()
+        for keys in AppSettings.DIFF_CATEGORY_TO_GENERATOR_KEYS.values():
+            all_translated.update(keys)
+        known = set(AppSettings.ENHANCEMENTS_FILES)
+        unknown = all_translated - known
+        assert not unknown, f"Translated keys not in ENHANCEMENTS_FILES: {unknown}"
+
+    def test_ships_translates_correctly(self):
+        from src.utils.settings import AppSettings
+
+        assert AppSettings.DIFF_CATEGORY_TO_GENERATOR_KEYS["ships"] == ["ship_descs"]
+
+    def test_components_translates_to_component_descs(self):
+        from src.utils.settings import AppSettings
+
+        assert "component_descs" in AppSettings.DIFF_CATEGORY_TO_GENERATOR_KEYS["components"]
+
     def test_is_absolute(self):
         assert _resolve_patches_dir().is_absolute()
 

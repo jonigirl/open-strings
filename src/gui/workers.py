@@ -270,7 +270,16 @@ class EnhancementsGeneratorWorker(QThread):
                     )
                     diff = None  # None = treat as first run, regenerate everything
             if diff is not None:
-                self.categories = diff  # empty = skip all; non-empty = subset
+                if diff:
+                    # Translate CATEGORY_SUBTREES keys → generator file keys, then
+                    # intersect with what the user currently has enabled so that a
+                    # dirty diff cannot trigger a category the user turned off.
+                    translated: set[str] = set()
+                    for diff_key in diff:
+                        translated.update(AppSettings.DIFF_CATEGORY_TO_GENERATOR_KEYS.get(diff_key, [diff_key]))
+                    self.categories = translated & (self.categories or set(AppSettings.ENHANCEMENTS_FILES))
+                else:
+                    self.categories = set()  # nothing changed — skip all
             # ─────────────────────────────────────────────────────────────────
 
             # Re-apply DataForge patches before generation. apply_patches is

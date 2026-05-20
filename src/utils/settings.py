@@ -97,6 +97,19 @@ class AppSettings:
         "journal": ["journal"],
     }
 
+    # Maps dataforge_diff.CATEGORY_SUBTREES keys to generate_enhancements_ini.py
+    # file keys (_want() / ENHANCEMENTS_FILES).  Used by EnhancementsGeneratorWorker
+    # to translate dirty_categories() output into the generator's internal vocabulary.
+    DIFF_CATEGORY_TO_GENERATOR_KEYS: dict[str, list[str]] = {
+        "ships": ["ship_descs"],
+        "components": ["component_descs"],
+        "ship_weapons": ["ship_weapon_descs", "missile_enhancements"],
+        "fps_weapons": ["fps_weapon_descs"],
+        "missions": ["mission_rewards"],
+        "commodities": ["commodity_crafting"],
+        "journal": ["journal"],
+    }
+
     # Settings keys - Legacy
     GAME_INSTALL_PATH = "game_install_path"
     WINDOW_GEOMETRY = "window_geometry"
