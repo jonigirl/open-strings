@@ -6,6 +6,15 @@
 
 Open Strings has returned to active development targeting Star Citizen 4.8.
 
+## 1.3.9 — Settings & installer improvements ✓ Released 2026-05-21
+
+- [x] App settings migrated from Windows registry to plain JSON file in `%APPDATA%` — portable and survives reinstalls
+- [x] Installer writes a handoff file so the chosen SC install path is applied on first launch
+- [x] RSI Launcher auto-detection for SC install root (installer wizard + app fallback chain)
+- [x] Uninstaller offers to remove the DataForge game data cache (~1.4 GB)
+- [x] Activity spinner alternates between light blue and light pink
+- [x] Fix mypy error: `shutil.rmtree` now uses `onexc=` keyword directly (Python 3.12+)
+
 ## 1.3.0 — Return to Active Development ✓ Released 2026-05-20
 
 _Star Citizen 4.8 compatibility and new features._
