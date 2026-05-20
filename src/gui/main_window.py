@@ -1748,7 +1748,7 @@ class MainWindow(QMainWindow):
         if self._channel_indicator is not None:
             return
         self._channel_indicator = QLabel()
-        self._channel_indicator.setStyleSheet("font-size: 11px; font-weight: bold; padding: 0 8px;")
+        self._channel_indicator.setStyleSheet("font-size: 11px; font-weight: bold; padding: 2px 8px;")
         self._status_bar().addPermanentWidget(self._channel_indicator)
         self._refresh_channel_indicator()
 
@@ -1757,7 +1757,7 @@ class MainWindow(QMainWindow):
         if self._app_version_indicator is not None:
             return
         self._app_version_indicator = QLabel(f"v{get_version()}")
-        self._app_version_indicator.setStyleSheet("font-size: 11px; padding: 0 8px;")
+        self._app_version_indicator.setStyleSheet("font-size: 11px; padding: 2px 8px;")
         self._status_bar().addPermanentWidget(self._app_version_indicator)
 
     def _refresh_channel_indicator(self) -> None:

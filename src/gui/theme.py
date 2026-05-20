@@ -74,7 +74,7 @@ def apply_body_font(preference: str = "atkinson") -> None:
     family = BODY_FONT_OD if preference == "opendyslexic" else BODY_FONT_FAMILY
     app = QApplication.instance()
     if isinstance(app, QApplication):
-        font = QFont(family, 10)
+        font = QFont(family, 11)
         app.setFont(font)
 
 
