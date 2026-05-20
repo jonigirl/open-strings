@@ -556,9 +556,9 @@ class TestSyncKeyVariants:
         with caplog.at_level(logging.WARNING, logger="src.merger.ini_merger"):
             sync_key_variants(merged)
         assert any("conflict" in rec.message.lower() for rec in caplog.records)
-        # Non-_SCItem variant still wins
-        assert merged["item_nameSHLD_foo"] == "canonical_value"
-        assert merged["item_nameSHLD_foo_SCItem"] == "canonical_value"
+        # Longer value wins — the _SCItem variant has more content here
+        assert merged["item_nameSHLD_foo"] == "different_scitem_value"
+        assert merged["item_nameSHLD_foo_SCItem"] == "different_scitem_value"
 
 
 if __name__ == "__main__":

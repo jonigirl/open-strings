@@ -149,11 +149,14 @@ def sync_key_variants(merged_dict: dict[str, str]) -> None:
         if len(variants) <= 1:
             continue
 
-        # Prefer non-_SCItem variant as the authoritative value;
-        # fall back to first variant if all have the _SCItem suffix.
-        preferred_key = next(
-            (v for v in variants if not v.lower().endswith("_scitem")),
-            variants[0],
+        # Prefer the variant with the richest (longest) value. Enhancements
+        # always add content (grade brackets, stats), so the longer string is
+        # the more informative one. Falls back to the non-_SCItem key when
+        # all values are equal length (the common case where variants already
+        # agree and either choice is correct).
+        preferred_key = max(
+            variants,
+            key=lambda v: (len(merged_dict[v]), not v.lower().endswith("_scitem")),
         )
         synced_value = merged_dict[preferred_key]
 
