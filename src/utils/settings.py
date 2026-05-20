@@ -174,6 +174,73 @@ def _migrate_from_registry(store: _JsonSettingsStore, org: str, app: str) -> Non
         logger.warning(f"Registry migration failed (non-fatal): {e}")
 
 
+_handoff_applied: bool = False
+
+
+def _apply_installer_handoff(store: _JsonSettingsStore) -> None:
+    """Apply installer-handoff.json written by the Inno Setup installer.
+
+    The installer writes sc_install_root (and optionally user_data_dir) to
+    this file so that upgrades where settings.json already exists still pick
+    up the values the user chose during installation.  Runs at most once per
+    process; the handoff file is deleted after use.
+    """
+    global _handoff_applied
+    if _handoff_applied:
+        return
+    _handoff_applied = True
+    handoff_path = store._path.parent / "installer-handoff.json"
+    if not handoff_path.exists():
+        return
+    try:
+        data = json.loads(handoff_path.read_text(encoding="utf-8"))
+        for key, value in data.items():
+            if isinstance(value, str) and value:
+                store._set(key, value)
+        store._flush()
+        handoff_path.unlink()
+        logger.info("Applied installer handoff settings.")
+    except Exception as e:
+        logger.warning("Failed to apply installer handoff (non-fatal): %s", e)
+
+
+def _detect_rsi_sc_root() -> str:
+    """Read the RSI Launcher's configured library path to locate the SC install root.
+
+    The RSI Launcher stores its library folder in
+    ``%APPDATA%\\rsilauncher\\settings.json`` (key ``libraryPath``).  The
+    StarCitizen root is a sub-directory of that library folder.
+    Returns an empty string when the file is absent, unreadable, or the
+    derived paths do not exist.
+    """
+    if sys.platform != "win32":
+        return ""
+    appdata = os.environ.get("APPDATA", "")
+    if not appdata:
+        return ""
+    candidates = [
+        Path(appdata) / "rsilauncher" / "settings.json",
+        Path(appdata) / "rsi-launcher" / "settings.json",
+    ]
+    for settings_path in candidates:
+        if not settings_path.exists():
+            continue
+        try:
+            data = json.loads(settings_path.read_text(encoding="utf-8"))
+            lib = data.get("libraryPath", "")
+            if not lib:
+                continue
+            sc = Path(lib) / "StarCitizen"
+            if sc.exists():
+                return str(sc)
+            # libraryPath might already be the StarCitizen root
+            if (Path(lib) / "LIVE").exists():
+                return lib
+        except Exception:
+            pass
+    return ""
+
+
 class AppSettings:
     """Wrapper around QSettings for application configuration."""
 
@@ -321,6 +388,7 @@ class AppSettings:
         store = _JsonSettingsStore(path)
         if not path.exists():
             _migrate_from_registry(store, AppSettings.ORG_NAME, AppSettings.APP_NAME)
+        _apply_installer_handoff(store)
         return store
 
     @staticmethod
@@ -430,7 +498,7 @@ class AppSettings:
         then to the installer-written registry key, for users whose
         settings haven't yet been written (new install first-launch only).
         """
-        root = AppSettings.settings().value(AppSettings.SC_INSTALL_ROOT, "")
+        root = AppSettings.get_sc_install_root()
         if root:
             return str(Path(root) / AppSettings.get_active_channel())
 
@@ -797,6 +865,10 @@ class AppSettings:
         for candidate in AppSettings._RSI_DEFAULT_ROOTS:
             if Path(candidate).exists():
                 return candidate
+
+        rsi_root = _detect_rsi_sc_root()
+        if rsi_root:
+            return rsi_root
         return ""
 
     @staticmethod

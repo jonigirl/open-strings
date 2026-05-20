@@ -29,9 +29,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [CustomMessages]
 SCDirectoryPrompt=Star Citizen Installation
-SCDirectoryPromptDesc=Where is Star Citizen installed?
-SCDirectoryDefaultDesc=Select the folder that contains your Star Citizen channels (LIVE, PTU, etc.).
-SCDirectoryDefaultPath=C:\Program Files\Roberts Space Industries\StarCitizen\LIVE
+SCDirectoryPromptDesc=Where is your Star Citizen library folder?
+SCDirectoryDefaultDesc=Select the folder that contains your Star Citizen channels — LIVE, PTU, HOTFIX, etc. This is the StarCitizen folder inside your RSI library, not a channel folder itself.
 
 [InstallDelete]
 ; Clear previous install directory completely before installing new files
@@ -325,11 +324,97 @@ begin
   end;
 end;
 
+function ExtractJSONString(const JSON: String; const Key: String): String;
+{ Returns the string value of a top-level JSON key, handling \\ and \" escapes.
+  Only works for simple flat objects — sufficient for RSI Launcher settings.json. }
+var
+  KeySearch: String;
+  P: Integer;
+  Val: String;
+begin
+  Result := '';
+  KeySearch := '"' + Key + '"';
+  P := Pos(KeySearch, JSON);
+  if P = 0 then Exit;
+  P := P + Length(KeySearch);
+  while (P <= Length(JSON)) and ((JSON[P] = ' ') or (JSON[P] = ':') or (JSON[P] = #9)) do
+    P := P + 1;
+  if (P > Length(JSON)) or (JSON[P] <> '"') then Exit;
+  P := P + 1;
+  Val := '';
+  while P <= Length(JSON) do
+  begin
+    if JSON[P] = '\' then
+    begin
+      P := P + 1;
+      if P <= Length(JSON) then
+      begin
+        if JSON[P] = '"' then Val := Val + '"'
+        else if JSON[P] = '\' then Val := Val + '\'
+        else if JSON[P] = 'n' then Val := Val + #10
+        else if JSON[P] = 'r' then Val := Val + #13
+        else Val := Val + JSON[P];
+        P := P + 1;
+      end;
+    end
+    else if JSON[P] = '"' then
+    begin
+      Result := Val;
+      Exit;
+    end
+    else
+    begin
+      Val := Val + JSON[P];
+      P := P + 1;
+    end;
+  end;
+end;
+
+function TryRSISettingsFile(const SettingsPath: String): String;
+var
+  RawContent: AnsiString;
+  Content: String;
+  LibPath: String;
+begin
+  Result := '';
+  if not FileExists(SettingsPath) then Exit;
+  if not LoadStringFromFile(SettingsPath, RawContent) then Exit;
+  Content := String(RawContent);
+  LibPath := ExtractJSONString(Content, 'libraryPath');
+  if LibPath = '' then Exit;
+  if DirExists(LibPath + '\StarCitizen') then
+    Result := LibPath + '\StarCitizen'
+  else if DirExists(LibPath + '\LIVE') then
+    Result := LibPath;
+end;
+
+function GetRSILauncherRoot(): String;
+{ Reads the RSI Launcher's configured library path from its settings.json.
+  The launcher stores this in %APPDATA%\rsilauncher\ (or rsi-launcher\). }
+begin
+  Result := TryRSISettingsFile(ExpandConstant('{userappdata}') + '\rsilauncher\settings.json');
+  if Result = '' then
+    Result := TryRSISettingsFile(ExpandConstant('{userappdata}') + '\rsi-launcher\settings.json');
+end;
+
+function EscapeJSON(const S: String): String;
+var
+  Escaped: String;
+begin
+  Escaped := S;
+  StringChange(Escaped, '\', '\\');
+  StringChange(Escaped, '"', '\"');
+  Result := Escaped;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   RegPath: String;
   FinalPath: String;
   DataDir: String;
+  HandoffDir: String;
+  HandoffFile: String;
+  HandoffJSON: String;
 begin
   if CurStep = ssInstall then
   begin
@@ -362,6 +447,25 @@ begin
         ForceDirectories(DataDir);
         Log('Saved user_data_dir: ' + DataDir);
       end;
+    end;
+    { Installer handoff: write a JSON file the app reads on next launch.
+      The registry migration only runs once (first launch, when settings.json
+      doesn't exist yet). On upgrades the JSON file already exists, so the
+      registry values above would be silently ignored. This handoff file is
+      checked on every startup and applied unconditionally, then deleted. }
+    if FinalPath <> '' then
+    begin
+      HandoffDir := ExpandConstant('{userappdata}') + '\Joni Hayes\Open Strings';
+      ForceDirectories(HandoffDir);
+      HandoffFile := HandoffDir + '\installer-handoff.json';
+      HandoffJSON := '{"sc_install_root":"' + EscapeJSON(FinalPath) + '"'
+        + ',"active_channel":"LIVE"'
+        + ',"game_install_path":"' + EscapeJSON(FinalPath + '\LIVE') + '"';
+      if DataDirPromptShown and (DataDir <> '') then
+        HandoffJSON := HandoffJSON + ',"user_data_dir":"' + EscapeJSON(DataDir) + '"';
+      HandoffJSON := HandoffJSON + '}';
+      SaveStringToFile(HandoffFile, HandoffJSON, False);
+      Log('Wrote installer-handoff.json: ' + HandoffFile);
     end;
   end;
 end;
@@ -704,7 +808,9 @@ begin
     if not FileExists(P4KPath) then
     begin
       if MsgBox('Data.p4k was not found at:' + #13#10 + P4KPath + #13#10 + #13#10
-                + 'Star Citizen LIVE may not be installed here.' + #13#10
+                + 'Please check you are pointing to the folder that contains' + #13#10
+                + 'your Star Citizen channels (LIVE, PTU, HOTFIX, etc.),' + #13#10
+                + 'not to a channel folder itself.' + #13#10 + #13#10
                 + 'You can continue and update the path later inside the app.' + #13#10 + #13#10
                 + 'Continue with this path?',
                 mbConfirmation, MB_YESNO) = IDNO then
@@ -741,12 +847,22 @@ begin
         SavedPath := Copy(SavedPath, 1, Length(SavedPath) - 1);
       DefaultPath := SavedPath;
     end
-    else if DirExists('C:\Program Files\Roberts Space Industries\StarCitizen') then
-      DefaultPath := 'C:\Program Files\Roberts Space Industries\StarCitizen'
-    else if DirExists('C:\Program Files (x86)\Roberts Space Industries\StarCitizen') then
-      DefaultPath := 'C:\Program Files (x86)\Roberts Space Industries\StarCitizen'
     else
-      DefaultPath := 'C:\Program Files\Roberts Space Industries\StarCitizen';
+    begin
+      { No previously saved path: ask the RSI Launcher first (handles custom
+        library locations), then check the common default paths, then fall
+        back to the standard RSI install location. }
+      DefaultPath := GetRSILauncherRoot();
+      if DefaultPath = '' then
+      begin
+        if DirExists('C:\Program Files\Roberts Space Industries\StarCitizen') then
+          DefaultPath := 'C:\Program Files\Roberts Space Industries\StarCitizen'
+        else if DirExists('C:\Program Files (x86)\Roberts Space Industries\StarCitizen') then
+          DefaultPath := 'C:\Program Files (x86)\Roberts Space Industries\StarCitizen'
+        else
+          DefaultPath := 'C:\Program Files\Roberts Space Industries\StarCitizen';
+      end;
+    end;
   end;
 
   SCDirectoryPage := CreateInputDirPage(
