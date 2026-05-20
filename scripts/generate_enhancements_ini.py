@@ -133,9 +133,32 @@ def write_ini(path: Path, entries: dict[str, str]) -> None:
 #   scitem_lookups v2 (1.3.1) — emits entity_names_by_filename
 #     (xml_file.stem.lower() → display name) as a third return value;
 #     enables build_blueprint_pool_lookup's filename-stem tier.
+#   scitem_lookups v3 (1.4.0) — added a fourth tuple slot
+#     (entity_name_tags: ref → "[CLASS-Sx-grade]") so blueprint pool
+#     items get the same annotation components do in their stock title.
+#     v2 pickles unpack as 3-tuples and crash the new 4-tuple consumer.
+#   blueprint_pools v5 (1.4.0) — blueprint pool items now carry inline
+#     [CLASS-Sx-grade] tags on UUID-resolved names (e.g. "Norfield"
+#     becomes "Norfield [MIL-S1-A]"). v4 pickles hold the un-annotated
+#     names and would silently undo the annotation on cache hit.
+#   blueprint_pools v6 (1.4.0) — strip the leading CIG-baked size prefix
+#     (S0 , S00 , S1 …) from blueprint-list display names
+#     so mining-head entries like "S0 Helix" render as "Helix".
+#     v5 pickles hold the un-stripped names.
+#   scitem_lookups v4 / blueprint_pools v7 (1.4.0) — _component_name_tag
+#     gained a fallback path that tags items lacking the full
+#     Size:/Grade:/Class: trio, using Item Type: as a Class: substitute
+#     (e.g. mining heads carry "Item Type: Mining Laser" → "MIN").
+#     Both caches stored values produced by the strict-only tagger and
+#     would silently keep mining heads / lasers untagged on cache hit.
+#   blueprint_pools v8 (1.4.0) — return tuple shape changed from
+#     dict[uuid, items] to (dict[uuid, items], dict[uuid, name])
+#     so downstream rendering can derive rank-tier labels (Rank 0–1,
+#     Rank 2–3, Rank 4) from the pool filename. v7 pickles unpack as
+#     a bare dict and would crash the new 2-tuple consumer.
 _LOOKUP_VERSIONS: dict[str, str] = {
-    "blueprint_pools": "v4",
-    "scitem_lookups": "v2",
+    "blueprint_pools": "v8",
+    "scitem_lookups": "v4",
 }
 
 
@@ -345,25 +368,61 @@ _CLASS_ABBREV = {
     "Stealth": "STH",
 }
 
+# Abbreviations for the "Item Type:" field found in mining-head and related
+# descriptions that lack the full Size:/Grade:/Class: trio. Extend this dict
+# as new gear categories surface that need similar handling.
+_ITEM_TYPE_ABBREV: dict[str, str] = {
+    "Mining Laser": "MIN",
+}
+
 
 def _component_name_tag(desc_value: str, root: ET.Element | None = None) -> str | None:
-    """Extract [CLASS-S{size}-{grade}] tag from a component description string.
+    """Build a bracket annotation tag from a component-style description.
 
-    Parses the structured header lines (Size: N, Grade: X, Class: Y) that appear
-    at the top of ship component descriptions in the base localization.
+    Two paths, both producing the same [...] shape:
 
-    Returns:
-        Tag string like "[MIL-S1-A]" or None if parsing fails.
+      Strict — Size: N + Grade: A-D + Class: <recognised> → "[CLASS-Sx-grade]"
+        e.g. "Size: 1\nGrade: A\nClass: Military"  →  "[MIL-S1-A]"
+        Ship components (shield, cooler, powerplant, qdrive, radar) all
+        author this trio. Preserved from the original implementation.
+
+      Fallback — Size: N (accepts "S" prefix) + Item Type or Grade, no Class:
+        → "[TYPE-Sx-grade]"  (Item Type maps to abbrev, Grade present)
+        → "[TYPE-Sx]"        (Item Type only)
+        → "[Sx-grade]"       (Grade only, unknown type)
+
+    Requiring at least one of {type_abbrev, grade_m} on the fallback path
+    keeps a bare [Sx] from leaking onto anything that happens to have
+    a Size: line (consumables, ammo containers, etc.).
+
+    Returns None when Size: itself is missing OR when the fallback's
+    minimum-information bar isn't met.
     """
+    # Strict path — original behaviour unchanged.
     size_m = re.search(r"Size:\s*(\d+)", desc_value)
     grade_m = re.search(r"Grade:\s*([A-D])", desc_value)
     class_m = re.search(r"Class:\s*(\w+)", desc_value)
-    if not (size_m and grade_m and class_m):
+    if size_m and grade_m and class_m:
+        abbrev = _CLASS_ABBREV.get(class_m.group(1))
+        if abbrev:
+            return f"[{abbrev}-S{size_m.group(1)}-{grade_m.group(1)}]"
+
+    # Fallback path — mining heads / lasers write "Size: S0" / "Size: S00";
+    # accept an optional leading 'S' on the digit.
+    size_fb = re.search(r"Size:\s*S?(\d+)", desc_value)
+    if not size_fb:
         return None
-    abbrev = _CLASS_ABBREV.get(class_m.group(1))
-    if not abbrev:
-        return None
-    return f"[{abbrev}-S{size_m.group(1)}-{grade_m.group(1)}]"
+    size_str = size_fb.group(1)
+    type_m = re.search(r"Item Type:\s*([^\\\n]+)", desc_value)
+    type_abbrev = _ITEM_TYPE_ABBREV.get(type_m.group(1).strip()) if type_m else None
+    # Re-use grade_m from the strict path (pattern unchanged).
+    if type_abbrev and grade_m:
+        return f"[{type_abbrev}-S{size_str}-{grade_m.group(1)}]"
+    if type_abbrev:
+        return f"[{type_abbrev}-S{size_str}]"
+    if grade_m:
+        return f"[S{size_str}-{grade_m.group(1)}]"
+    return None
 
 
 # CIG's internal trackingSignalType values → in-game community shorthand.
@@ -1475,12 +1534,64 @@ def _name_from_blueprint_filename(bp_xml: Path) -> str:
     return stem.replace("_", " ").replace("-", " ").title()
 
 
+# Matches a leading CIG-baked size designator in an entity display name —
+# "S0 Helix", "S00 Hofstede", "S1 …" etc. Mining heads and a handful of
+# other entity classes carry the size as a prefix on the loc-name attribute
+# itself (rather than in the description's Size: header field that the tagger
+# reads). Anchored on a word boundary + required digits so names starting
+# with 'S' + letters (Sasquatch, Slicer) are left alone.
+_CIG_SIZE_PREFIX_RE = re.compile(r"^S\d+\s+", re.IGNORECASE)
+
+
+def _strip_cig_size_prefix(name: str) -> str:
+    """Remove a leading 'S0 ' / 'S00 ' / 'S1 ' size prefix from a display name."""
+    return _CIG_SIZE_PREFIX_RE.sub("", name, count=1)
+
+
+# Pool rank label — Shubin and similar families name their progression-
+# gated pools with a RankN or RankNtoM suffix (e.g. bp_rewards_shubinrank0to1
+# / shubinrank2to3 / shubinrank4). Surfacing those as a sub-section label
+# in POTENTIAL BLUEPRINTS lets a player tell at a glance which rewards
+# correspond to which reputation tier.
+#
+# Two patterns to recognise:
+#   RankNtoM → "Rank N–M"   (e.g. Rank0to1 → "Rank 0–1")
+#   RankN    → "Rank N"     (e.g. Rank4 → "Rank 4")
+_POOL_RANK_RANGE_RE = re.compile(r"rank(\d+)to(\d+)", re.IGNORECASE)
+_POOL_RANK_SINGLE_RE = re.compile(r"rank(\d+)", re.IGNORECASE)
+
+
+def _pool_rank_label(stem: str) -> str:
+    """Derive a human-readable rank-tier label from a blueprint pool's filename.
+
+    Examples:
+      "bp_rewards_shubinrank0to1"  → "Rank 0–1"
+      "bp_rewards_shubinrank4"     → "Rank 4"
+      "bp_rewards_shubinrank2to3"  → "Rank 2–3"
+      "bp_rewards_headhuntersmercenaryshipregionc" → ""  (region, not rank)
+
+    Returns empty string when no rank token matches — callers should
+    treat that as "no label" and render the sub-section header without
+    a rank suffix.
+    """
+    if not stem:
+        return ""
+    m_range = _POOL_RANK_RANGE_RE.search(stem)
+    if m_range:
+        return f"Rank {m_range.group(1)}\u2013{m_range.group(2)}"
+    m_single = _POOL_RANK_SINGLE_RE.search(stem)
+    if m_single:
+        return f"Rank {m_single.group(1)}"
+    return ""
+
+
 def build_blueprint_pool_lookup(
     pool_dir: Path,
     bp_dir: Path,
     entity_names: dict[str, str],
     entity_names_by_filename: dict[str, str] | None = None,
-) -> dict[str, list[str]]:
+    entity_name_tags: dict[str, str] | None = None,
+) -> tuple[dict[str, list[str]], dict[str, str]]:
     """Build mapping of blueprint pool UUID → list of craftable item display names.
 
     Args:
@@ -1490,12 +1601,21 @@ def build_blueprint_pool_lookup(
         entity_names_by_filename: xml_file.stem.lower() → display name, second-tier
             fallback for blueprints whose entityClass UUID is absent from entity_names.
             Pass None to skip this tier (e.g. when called outside the main pipeline).
+        entity_name_tags: UUID → "[CLASS-Sx-grade]" tag built by build_scitem_lookups.
+            When supplied AND the tier-1 (UUID) match hits, the tag is appended to the
+            display name. Tier-2/3 paths skip the tag. Pass None to omit annotation
+            (pre-1.4.0 behaviour).
 
     Returns:
-        Dict mapping pool __ref UUID → sorted list of item display names
+        Tuple of:
+          - pool_items: {pool __ref UUID: sorted list of item display names}
+          - pool_names: {pool __ref UUID: filename stem}. The stem is the
+            CIG-authored filename minus the bp_rewards_ / bp_ prefix
+            (e.g. shubinrank0to1). Downstream uses this to derive
+            sub-section labels via _pool_rank_label.
     """
     if not pool_dir.exists() or not bp_dir.exists():
-        return {}
+        return {}, {}
 
     # Index all blueprint files by __ref UUID → (entityClass UUID, fallback name).
     # Fallback name is derived from the blueprint XML filename so that pools
@@ -1524,14 +1644,24 @@ def build_blueprint_pool_lookup(
         except ET.ParseError:
             continue
 
-    # Build pool UUID → item names
+    entity_name_tags = entity_name_tags or {}
+
+    # Build pool UUID → item names and UUID → filename stem
     pool_items: dict[str, list[str]] = {}
+    pool_names: dict[str, str] = {}
     for xml_file in pool_dir.rglob("*.xml"):
         try:
             root = ET.parse(xml_file).getroot()
             pool_uuid = root.get("__ref", "")
             if not pool_uuid:
                 continue
+            # Derive the stem without the bp_rewards_ / bp_ prefix so
+            # _pool_rank_label can parse RankN/RankNtoM tokens from it.
+            raw_stem = xml_file.stem
+            for pfx in ("bp_rewards_", "bp_"):
+                if raw_stem.startswith(pfx):
+                    raw_stem = raw_stem[len(pfx) :]
+                    break
             names = []
             for elem in root.iter("BlueprintReward"):
                 bp_ref = elem.get("blueprintRecord", "")
@@ -1539,7 +1669,11 @@ def build_blueprint_pool_lookup(
                     entity_ref, stem_key, fallback_name = bp_entity[bp_ref]
                     if entity_ref in entity_names:
                         # Tier 1 — UUID match via entityClass attribute.
-                        name = entity_names[entity_ref]
+                        # Strip CIG-baked size prefix then optionally annotate.
+                        name = _strip_cig_size_prefix(entity_names[entity_ref])
+                        tag = entity_name_tags.get(entity_ref)
+                        if tag:
+                            name = f"{name} {tag}"
                     elif stem_key in entity_names_by_filename:
                         # Tier 2 — filename stem match. Handles cases where
                         # CIG ships a blueprint XML whose entityClass UUID
@@ -1548,7 +1682,7 @@ def build_blueprint_pool_lookup(
                         # indexed by build_scitem_lookups. More reliable
                         # than the filename-derived title fallback below
                         # because this still uses the real localised name.
-                        name = entity_names_by_filename[stem_key]
+                        name = _strip_cig_size_prefix(entity_names_by_filename[stem_key])
                     else:
                         # Tier 3 — filename-derived fallback (title-cased
                         # stem). Least accurate but ensures the pool still
@@ -1559,11 +1693,12 @@ def build_blueprint_pool_lookup(
                         names.append(name)
             if names:
                 pool_items[pool_uuid] = sorted(names)
+                pool_names[pool_uuid] = raw_stem
         except ET.ParseError:
             continue
 
     logger.info(f"Blueprint pool lookup: {len(pool_items)} pools with items")
-    return pool_items
+    return pool_items, pool_names
 
 
 def _build_template_lookup(templates_dir: Path) -> dict[str, tuple[str, str]]:
@@ -1632,27 +1767,37 @@ def scan_contract_generators(
     reputation_lookup: dict[str, int] | None = None,
     blueprint_pools: dict[str, list[str]] | None = None,
     entity_names: dict[str, str] | None = None,
+    pool_names: dict[str, str] | None = None,
 ):
     """Scan contract generator XMLs for mission variants with different systems.
 
     Returns tuple of:
         - missions: dict mapping title_key → [(system_name, success_xp, failure_xp, desc_key, flags, num_enemies, num_not_enemies), ...]
-        - mission_blueprints: dict title_key → dict system_name → list of craftable item display names.
-          Multiple entries indicate per-region pools (e.g. Stanton vs Pyro Shubin HandMining). A single entry is rendered flat.
+        - mission_blueprints: dict title_key → dict system_name → dict pool_label → list of craftable item display names.
+          The pool_label dimension preserves rank-tier sub-grouping derived from the
+          pool filename (e.g. Rank 0–1 / Rank 2–3 / Rank 4 from Shubin progression
+          pools). Empty string label is used for pools whose names don’t encode a
+          rank — those render with the original system-only header.
+          Multiple system entries indicate per-region pools (e.g. Stanton vs Pyro
+          Shubin HandMining); multiple label entries within a system indicate
+          rank-tiered pools the same contract pulls from at different ranks.
+        - mission_bp_chance: dict mapping title_key → float
         - mission_items: dict mapping title_key → list of reward item display names
     Sorted by system name for consistent output.
     """
     if not contractgen_dir.exists():
-        return {}, {}, {}
+        return {}, {}, {}, {}
 
     reputation_lookup = reputation_lookup or {}
     blueprint_pools = blueprint_pools or {}
     entity_names = entity_names or {}
+    pool_names = pool_names or {}
     # Variant tuple: (system_name, success_xp, failure_xp, desc_key, flags, num_enemies, num_not_enemies)
     missions: dict[str, list[tuple[str, int, int, str, list[str], int, int]]] = {}
-    # Per-system pool items, so desc output can render regional sub-sections
-    # when a title_key has distinct pools for different systems.
-    mission_blueprints: dict[str, dict[str, list[str]]] = {}
+    # Per-system, per-pool-label item lists. The extra label dimension keeps
+    # items from different rank-tier pools separate inside one system so the
+    # renderer can label each tier (e.g. "[Stanton, Rank 0-1]").
+    mission_blueprints: dict[str, dict[str, dict[str, list[str]]]] = {}
     mission_bp_chance: dict[str, float] = {}
     mission_items: dict[str, list[str]] = {}
 
@@ -1808,9 +1953,20 @@ def scan_contract_generators(
                                 if pool_uuid and pool_uuid != null_uuid and pool_uuid in blueprint_pools:
                                     contract_has_bp = True
                                     pool_items = blueprint_pools[pool_uuid]
+                                    # Derive the rank-tier label from the pool's
+                                    # filename. Pools without a rank token (most
+                                    # one-off pools, plus region-based pools whose
+                                    # geographic label is already covered by the
+                                    # system_name dimension) produce empty string,
+                                    # which keeps their sub-section header at the
+                                    # bare [system_name] shape.
+                                    pool_label = _pool_rank_label(pool_names.get(pool_uuid, ""))
                                     per_system = mission_blueprints.setdefault(title_key, {})
-                                    if system_name not in per_system:
-                                        per_system[system_name] = pool_items
+                                    per_label = per_system.setdefault(system_name, {})
+                                    existing_items = per_label.setdefault(pool_label, [])
+                                    for item in pool_items:
+                                        if item not in existing_items:
+                                            existing_items.append(item)
                                     try:
                                         contract_bp_chance = float(bp_elem.get("chance", "1"))
                                     except (ValueError, TypeError):
@@ -2801,8 +2957,8 @@ def build_ammo_lookup(ammo_dir: Path) -> dict[str, ET.Element]:
 def build_scitem_lookups(
     scitem_dir: Path,
     loc: dict[str, str] | None = None,
-) -> tuple[dict[str, tuple[str, str]], dict[str, str], dict[str, str]]:
-    """Single-pass scan of scitem XMLs that produces three lookups:
+) -> tuple[dict[str, tuple[str, str]], dict[str, str], dict[str, str], dict[str, str]]:
+    """Single-pass scan of scitem XMLs that produces four lookups:
 
     * mag_lookup: magazine entity class name → (ammoParamsRecord, maxAmmoCount)
       — derived from SAmmoContainerComponentParams elements.
@@ -2811,6 +2967,11 @@ def build_scitem_lookups(
     * entity_names_by_filename: xml_file.stem.lower() → display name
       — second-tier resolution for build_blueprint_pool_lookup when a
       blueprint's entityClass UUID is absent from entity_names.
+    * entity_name_tags: __ref UUID → "[CLASS-Sx-grade]" tag
+      — built from the Description= loc-key on the same entity. Only
+      populated for entities whose description yields a tag via
+      _component_name_tag (ship components + mining heads/lasers).
+      Used by build_blueprint_pool_lookup to annotate blueprint reward names.
 
     Walking the scitem tree once instead of twice (magazines + entity names
     used to iterate independently) cuts ~30s off the run since there are
@@ -2819,9 +2980,10 @@ def build_scitem_lookups(
     mag_lookup: dict[str, tuple[str, str]] = {}
     entity_names: dict[str, str] = {}
     entity_names_by_filename: dict[str, str] = {}
+    entity_name_tags: dict[str, str] = {}
     loc = loc or {}
     if not scitem_dir.exists():
-        return mag_lookup, entity_names, entity_names_by_filename
+        return mag_lookup, entity_names, entity_names_by_filename, entity_name_tags
 
     null_uuid = "00000000-0000-0000-0000-000000000000"
     for xml_file in scitem_dir.rglob("*.xml"):
@@ -2834,7 +2996,9 @@ def build_scitem_lookups(
         entity_name = root.tag.split(".")[-1] if "." in root.tag else xml_file.stem
         found_mag = False
         found_name = False
+        found_desc = False
         resolved_display_name: str | None = None
+        desc_loc_key: str | None = None
 
         for elem in root.iter():
             if not found_mag and _poly_type(elem) == "SAmmoContainerComponentParams":
@@ -2849,7 +3013,12 @@ def build_scitem_lookups(
                     loc_key = name_attr.lstrip("@")
                     resolved_display_name = loc.get(loc_key, loc_key)
                     found_name = True
-            if found_mag and found_name:
+            if not found_desc:
+                desc_attr = elem.get("Description", "")
+                if desc_attr and desc_attr.startswith("@") and not _is_sentinel_loc_ref(desc_attr):
+                    desc_loc_key = desc_attr.lstrip("@")
+                    found_desc = True
+            if found_mag and found_name and found_desc:
                 break
 
         if resolved_display_name is not None:
@@ -2857,12 +3026,23 @@ def build_scitem_lookups(
                 entity_names[ref] = resolved_display_name
             entity_names_by_filename[xml_file.stem.lower()] = resolved_display_name
 
-    return mag_lookup, entity_names, entity_names_by_filename
+        # Component name-tag derivation. _component_name_tag returns None for
+        # anything other than a ship component or mining head/laser, so
+        # non-component entities silently fall out here without polluting the
+        # dict. Requires both a __ref to key on and a resolvable description.
+        if ref and desc_loc_key:
+            desc_value = loc.get(desc_loc_key, "")
+            if desc_value:
+                tag = _component_name_tag(desc_value)
+                if tag:
+                    entity_name_tags[ref] = tag
+
+    return mag_lookup, entity_names, entity_names_by_filename, entity_name_tags
 
 
 def build_magazine_lookup(scitem_dir: Path) -> dict[str, tuple[str, str]]:
     """Back-compat wrapper around build_scitem_lookups — returns magazines only."""
-    mag_lookup, _, _ = build_scitem_lookups(scitem_dir)
+    mag_lookup, _, _, _ = build_scitem_lookups(scitem_dir)
     return mag_lookup
 
 
@@ -3069,6 +3249,7 @@ def main(
     mag_lookup: dict = {}
     entity_names: dict[str, str] = {}
     entity_names_by_filename: dict[str, str] = {}
+    entity_name_tags: dict[str, str] = {}
     controller_lookup: dict = {}
     armor_lookup: dict = {}
     reputation_lookup: dict[str, int] = {}
@@ -3130,11 +3311,12 @@ def main(
             logger.info(f"Vehicle ammo: {len(vehicle_ammo)} records, FPS ammo: {len(fps_ammo)} records")
             _tick("Built ammo lookups")
         if "scitem" in results:
-            mag_lookup, entity_names, entity_names_by_filename = results["scitem"]
+            mag_lookup, entity_names, entity_names_by_filename, entity_name_tags = results["scitem"]
             logger.info(
                 f"Magazine lookup: {len(mag_lookup)} entries, "
                 f"Entity names: {len(entity_names)} entries, "
-                f"Entity names by filename: {len(entity_names_by_filename)} entries"
+                f"Entity names by filename: {len(entity_names_by_filename)} entries, "
+                f"Entity name-tags: {len(entity_name_tags)} entries"
             )
             _tick("Built scitem lookups")
         if "controller" in results:
@@ -3402,11 +3584,15 @@ def main(
         # separate path elsewhere; now fully indexed here as well).
         pool_dir = records / "crafting" / "blueprintrewards"
         bp_dir = records / "crafting" / "blueprints" / "crafting"
-        blueprint_pools = _cached_lookup(
+        blueprint_pools, pool_names = _cached_lookup(
             forge_dir,
             "blueprint_pools",
             lambda: build_blueprint_pool_lookup(
-                pool_dir, bp_dir, entity_names, entity_names_by_filename=entity_names_by_filename
+                pool_dir,
+                bp_dir,
+                entity_names,
+                entity_names_by_filename=entity_names_by_filename,
+                entity_name_tags=entity_name_tags,
             ),
         )
         _tick("Built blueprint pool lookup")
@@ -3414,12 +3600,41 @@ def main(
         # Contract generator missions (multiple variants per title key)
         contractgen_dir = records / "contracts" / "contractgenerator"
         contractgen_missions, mission_blueprints, mission_bp_chance, mission_items = scan_contract_generators(
-            contractgen_dir, reputation_lookup, blueprint_pools, entity_names
+            contractgen_dir,
+            reputation_lookup,
+            blueprint_pools,
+            entity_names,
+            pool_names=pool_names,
         )
         logger.info(
             f"Processed {len(contractgen_missions)} contract generator mission variants, {len(mission_blueprints)} with blueprints, {len(mission_items)} with items"
         )
         _flush()
+
+        # Pre-scan pu_missions XMLs to map title_key → desc_keys referenced
+        # by ContractLegacy spawn paths. Used after the contractgen loop to
+        # drop orphan desc entries where a [BP]-tagged title's pu_missions
+        # side references descs that the contractgenerator never sees (and
+        # therefore can't award blueprints for — Covalex Interstellar repro:
+        # every contractgen variant of those titles carries BP, but the same
+        # title is referenced by pu_missions XMLs whose desc tokens never
+        # appear in any contractgen XML).
+        pu_title_to_descs: dict[str, set[str]] = {}
+        if pu_missions_dir.exists():
+            for _puf in pu_missions_dir.rglob("*.xml"):
+                try:
+                    _pu_root = ET.parse(_puf).getroot()
+                    _title_attr = _pu_root.get("title", "")
+                    _desc_attr = _pu_root.get("description", "")
+                    if not _title_attr.startswith("@") or not _desc_attr.startswith("@"):
+                        continue
+                    if _is_sentinel_loc_ref(_title_attr) or _is_sentinel_loc_ref(_desc_attr):
+                        continue
+                    _tk = _title_attr.lstrip("@")
+                    _dk = _desc_attr.lstrip("@")
+                    pu_title_to_descs.setdefault(_tk, set()).add(_dk)
+                except (ET.ParseError, Exception):
+                    continue
 
         mission_titles_augmented = 0
         for title_key, variants in contractgen_missions.items():
@@ -3567,32 +3782,48 @@ def main(
                     # have a wider per-system pool set than any one desc does).
                     pools_by_system = mission_blueprints.get(title_key, {})
                     desc_systems = {v[0] for v in desc_variants if v[8]}  # v[0]=system, v[8]=has_bp
-                    desc_pools = {s: items for s, items in pools_by_system.items() if s in desc_systems}
+                    desc_pools = {s: by_label for s, by_label in pools_by_system.items() if s in desc_systems}
                     if not desc_pools:
                         # Fallback: no intersection (defensive — shouldn't
                         # happen if any_variant_has_bp holds) — show whatever
                         # pools this title has.
                         desc_pools = pools_by_system
-                    # If distinct pools share identical item sets (same pool
-                    # UUID reused across systems), collapse to one section.
-                    unique_fps = {}
-                    for sys_name, items in desc_pools.items():
-                        fp = tuple(items)
-                        unique_fps.setdefault(fp, []).append(sys_name)
+                    # Flatten the per-system, per-rank-label structure into one
+                    # row per (system, label) pair so equal-item-list pairs can
+                    # dedupe under one header (e.g. Stanton + Pyro both award the
+                    # same Rank0to1 pool → one "[Stanton, Pyro, Rank 0–1]" header
+                    # instead of two identical blocks).
+                    unique_fps: dict[frozenset, set[tuple[str, str]]] = {}
+                    for sys_name, by_label in desc_pools.items():
+                        for pool_label, items in by_label.items():
+                            fp = frozenset(items)
+                            unique_fps.setdefault(fp, set()).add((sys_name, pool_label))
 
                     bp_body_parts: list[str] = []
                     if len(unique_fps) == 1:
-                        # One effective pool — render flat.
+                        # One effective pool — render flat unless there's a rank label.
                         items = list(next(iter(unique_fps)))
-                        bp_body_parts.append("\\n".join(f"- {name}" for name in items))
+                        only_keys = next(iter(unique_fps.values()))
+                        only_labels = sorted({lbl for _, lbl in only_keys if lbl})
+                        if only_labels:
+                            only_systems = sorted({s for s, _ in only_keys})
+                            header = f"{', '.join(only_systems)}, {', '.join(only_labels)}"
+                            bp_body_parts.append(
+                                f"<EM4>[{header}]</EM4>\\n" + "\\n".join(f"- {name}" for name in items)
+                            )
+                        else:
+                            bp_body_parts.append("\\n".join(f"- {name}" for name in items))
                     else:
-                        # Multiple regional pools — one sub-section each,
-                        # sorted by system name for stable output.
-                        for fp, systems in sorted(unique_fps.items(), key=lambda kv: sorted(kv[1])):
-                            label = ", ".join(sorted(systems))
+                        # Multiple regional or rank pools — one sub-section each,
+                        # sorted by keys for stable output.
+                        for fp, keys in sorted(unique_fps.items(), key=lambda kv: sorted(kv[1])):
+                            systems = sorted({s for s, _ in keys})
+                            labels = sorted({lbl for _, lbl in keys if lbl})
+                            sys_str = ", ".join(systems)
+                            header = f"{sys_str}, {', '.join(labels)}" if labels else sys_str
                             region_list = "\\n".join(f"- {name}" for name in fp)
-                            bp_body_parts.append(f"<EM4>[{label}]</EM4>\\n{region_list}")
-                    sections.append("<EM3>POTENTIAL BLUEPRINTS</EM3>\\n" + "\\n".join(bp_body_parts))
+                            bp_body_parts.append(f"<EM4>[{header}]</EM4>\\n{region_list}")
+                    sections.append("<EM3>POTENTIAL BLUEPRINTS</EM3>\\n" + "\\n\\n".join(bp_body_parts))
 
                 if title_key in mission_items:
                     item_list = "\\n".join(f"- {name}" for name in mission_items[title_key])
@@ -3634,6 +3865,31 @@ def main(
                         f"Skipping shared desc_key {desc_key!r} for title_key {title_key!r}: "
                         f"already written by a prior title_key (likely a game-side data bug)"
                     )
+
+        # Orphan pu-only desc cleanup. CIG runs two parallel mission-generation
+        # wrappers on the same title: modern CareerContract blocks (which carry
+        # BlueprintRewards and feed mission_blueprints) and older ContractLegacy
+        # blocks (which point at pu_missions XMLs via missionBrokerEntry and award
+        # no BP). The contractgen scan picks up both wrapper types, so desc_keys
+        # from ContractLegacy variants are written to `out` without a POTENTIAL
+        # BLUEPRINTS section even when their shared title is tagged [BP]. Drop
+        # those orphan entries so the title's [BP] claim only attaches to bodies
+        # that back it up.
+        orphans_dropped = 0
+        for _otk, _pu_descs in pu_title_to_descs.items():
+            if _otk not in out:
+                continue
+            if "<EM4>[BP]</EM4>" not in out.get(_otk, ""):
+                continue
+            for _odk in _pu_descs:
+                if _odk not in out:
+                    continue
+                if "<EM3>POTENTIAL BLUEPRINTS</EM3>" in out[_odk]:
+                    continue
+                del out[_odk]
+                orphans_dropped += 1
+        if orphans_dropped > 0:
+            logger.info(f"Dropped {orphans_dropped} orphan pu-only descriptions (no BP section under [BP] title)")
 
         # Second pu_missions pass: aggregate XP values for titles the
         # contractgen scan couldn't extract XP for (e.g. templated titles
