@@ -21,9 +21,10 @@ class AppSettings:
     # Settings keys - Appearance
     THEME = "theme"
     FONT_PREFERENCE = "font_preference"
+    FONT_SEGOE = "segoe"
     FONT_ATKINSON = "atkinson"
     FONT_OPENDYSLEXIC = "opendyslexic"
-    DEFAULT_FONT = FONT_ATKINSON
+    DEFAULT_FONT = FONT_SEGOE
 
     # Settings keys - Enhancements
     ENHANCEMENTS_ENABLED = "enhancements_enabled"
@@ -173,7 +174,7 @@ class AppSettings:
     def get_font_preference() -> str:
         """Get the preferred body font ('atkinson' or 'opendyslexic')."""
         value = AppSettings.settings().value(AppSettings.FONT_PREFERENCE, AppSettings.DEFAULT_FONT)
-        if value not in (AppSettings.FONT_ATKINSON, AppSettings.FONT_OPENDYSLEXIC):
+        if value not in (AppSettings.FONT_SEGOE, AppSettings.FONT_ATKINSON, AppSettings.FONT_OPENDYSLEXIC):
             return AppSettings.DEFAULT_FONT
         return value
 

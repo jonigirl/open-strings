@@ -405,7 +405,11 @@ class TestSourceAutoUpdate:
 
 
 class TestFontPreference:
-    def test_default_is_atkinson(self, isolated_qsettings):
+    def test_default_is_segoe(self, isolated_qsettings):
+        assert AppSettings.get_font_preference() == AppSettings.FONT_SEGOE
+
+    def test_roundtrip_atkinson(self, isolated_qsettings):
+        AppSettings.set_font_preference(AppSettings.FONT_ATKINSON)
         assert AppSettings.get_font_preference() == AppSettings.FONT_ATKINSON
 
     def test_roundtrip_opendyslexic(self, isolated_qsettings):

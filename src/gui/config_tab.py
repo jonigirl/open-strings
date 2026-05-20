@@ -91,6 +91,7 @@ class ConfigTab(QWidget):
         appearance_layout.addWidget(font_label)
         self.font_combo = QComboBox()
         self.font_combo.setToolTip("Choose the application body font. Takes effect immediately.")
+        self.font_combo.addItem("Segoe UI (System)", AppSettings.FONT_SEGOE)
         self.font_combo.addItem("Atkinson Hyperlegible", AppSettings.FONT_ATKINSON)
         self.font_combo.addItem("OpenDyslexic", AppSettings.FONT_OPENDYSLEXIC)
         current_font = AppSettings.get_font_preference()

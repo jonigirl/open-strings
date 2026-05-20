@@ -66,15 +66,27 @@ def load_application_fonts() -> None:
             logger.info(f"Registered body font: {ttf}")
 
 
-def apply_body_font(preference: str = "atkinson") -> None:
+SYSTEM_FONT_FAMILY = "Segoe UI"
+
+
+def apply_body_font(preference: str = "segoe") -> None:
     """Set the application-wide body font. Call after load_application_fonts()."""
     from PyQt6.QtGui import QFont
     from PyQt6.QtWidgets import QApplication
 
-    family = BODY_FONT_OD if preference == "opendyslexic" else BODY_FONT_FAMILY
+    if preference == "opendyslexic":
+        family = BODY_FONT_OD
+        size = 11
+    elif preference == "atkinson":
+        family = BODY_FONT_FAMILY
+        size = 11
+    else:
+        family = SYSTEM_FONT_FAMILY
+        size = 10
+
     app = QApplication.instance()
     if isinstance(app, QApplication):
-        font = QFont(family, 11)
+        font = QFont(family, size)
         app.setFont(font)
 
 
