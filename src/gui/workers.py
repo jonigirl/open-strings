@@ -255,20 +255,22 @@ class EnhancementsGeneratorWorker(QThread):
             # {...} → only re-run the categories whose source XMLs changed.
             libs_dir = forge_dir / "raw" / "libs"
             diff = dirty_categories(libs_dir)
-            # If enhancement files are missing, force regeneration even if the
-            # manifest says nothing changed — the manifest may have been written
-            # before enhancements were ever successfully generated.
-            if diff is not None and not diff:
+            # If any enabled enhancement files are missing, force a full
+            # regeneration — even if the manifest reports some or all categories
+            # as clean.  This handles first-run after a fresh install, and the
+            # case where a partial prior run generated only some categories
+            # (leaving the others absent).
+            if diff is not None:
                 cache_dir = AppSettings.get_cache_dir()
                 missing = [name for name in AppSettings.ENHANCEMENTS_FILES.values() if not (cache_dir / name).exists()]
                 if missing:
                     sample = ", ".join(missing[:3])
                     ellipsis = "…" if len(missing) > 3 else ""
                     logger.info(
-                        f"Diff-cache: manifest clean but {len(missing)} enhancement "
-                        f"file(s) missing ({sample}{ellipsis}), forcing regeneration."
+                        f"Diff-cache: {len(missing)} enhancement file(s) missing "
+                        f"({sample}{ellipsis}), forcing full regeneration."
                     )
-                    diff = None  # None = treat as first run, regenerate everything
+                    diff = None  # None = regenerate all enabled categories
             if diff is not None:
                 if diff:
                     # Translate CATEGORY_SUBTREES keys → generator file keys, then
