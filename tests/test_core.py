@@ -553,7 +553,7 @@ class TestSyncKeyVariants:
             "item_nameSHLD_foo": "canonical_value",
             "item_nameSHLD_foo_SCItem": "different_scitem_value",
         }
-        with caplog.at_level(logging.WARNING, logger="src.merger.ini_merger"):
+        with caplog.at_level(logging.DEBUG, logger="src.merger.ini_merger"):
             sync_key_variants(merged)
         assert any("conflict" in rec.message.lower() for rec in caplog.records)
         # Longer value wins — the _SCItem variant has more content here

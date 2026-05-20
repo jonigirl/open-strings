@@ -160,13 +160,16 @@ def sync_key_variants(merged_dict: dict[str, str]) -> None:
         )
         synced_value = merged_dict[preferred_key]
 
-        # Detect conflicts — after a clean hierarchy merge all variants should
-        # already agree. Log a warning when they don't so the discrepancy is
-        # visible in the log tab rather than silently lost.
+        # Variants can legitimately disagree for two reasons: (1) CIG ships
+        # the same concept under two differently-cased key names in global.ini,
+        # or (2) the enhancement generator writes to the _SCItem key form while
+        # global.ini uses the non-SCItem form. Both are expected and handled
+        # correctly above (longer/richer value wins). Log at DEBUG so the log
+        # tab stays clean; the full detail is still available for diagnostics.
         if any(merged_dict[v] != synced_value for v in variants):
             details = "; ".join(f"{v!r}={merged_dict[v]!r}" for v in variants)
-            logger.warning(
-                "Variant value conflict for canonical key %r — choosing %r=%r. All variants: %s",
+            logger.debug(
+                "Variant conflict for canonical key %r — choosing %r=%r. All variants: %s",
                 canonical,
                 preferred_key,
                 synced_value,
