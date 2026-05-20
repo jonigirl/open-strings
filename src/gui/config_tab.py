@@ -500,7 +500,7 @@ class ConfigTab(QWidget):
     def preview_merge(self):
         """Show a dry-run summary of the current merge configuration."""
         try:
-            from src.parser.ini_parser import (
+            from src.utils.string_loader import (
                 load_source_files,
                 load_sources_from_settings,
             )

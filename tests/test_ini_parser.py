@@ -5,11 +5,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 from src.models.string_model import StringEntry
 from src.parser.ini_parser import (
-    _determine_status_from_source,
     load_overrides,
+    parse_ini_file,
+)
+from src.utils.string_loader import (
+    _determine_status_from_source,
     load_source_files,
     load_sources_from_settings,
-    parse_ini_file,
 )
 
 # ---------------------------------------------------------------------------

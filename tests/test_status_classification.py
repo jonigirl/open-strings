@@ -1,9 +1,9 @@
-"""Tests for the Enhanced status in src.parser.ini_parser._determine_status_from_source."""
+"""Tests for the Enhanced status in src.utils.string_loader._determine_status_from_source."""
 
 from __future__ import annotations
 
 import pytest
-from src.parser.ini_parser import _determine_status_from_source
+from src.utils.string_loader import _determine_status_from_source
 
 pytestmark = pytest.mark.unit
 
