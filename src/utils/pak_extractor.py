@@ -17,8 +17,6 @@ from src.utils.perf import timed
 
 logger = logging.getLogger(__name__)
 
-_RMTREE_CB_KWARG = "onexc"
-
 # Track active subprocesses by Python thread-id so they can be killed
 # from the main thread when the app closes mid-extraction.
 _active_procs: dict[int, subprocess.Popen] = {}
@@ -61,7 +59,7 @@ def robust_rmtree(path: Path, attempts: int = 6) -> None:
     for i in range(attempts):
         try:
             gc.collect()  # drop any lingering XML file handles we own
-            shutil.rmtree(path, **{_RMTREE_CB_KWARG: _onexc})
+            shutil.rmtree(path, onexc=_onexc)
             return
         except OSError as e:
             last_err = e
