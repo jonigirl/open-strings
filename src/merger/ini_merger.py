@@ -1,6 +1,8 @@
 """INI file merger for combining base and custom strings."""
 
 import logging
+import os
+import tempfile
 from collections import defaultdict
 from functools import cache
 from pathlib import Path
@@ -204,8 +206,13 @@ def merge_ini_files(source_path: str | Path, overrides_dict: dict[str, str], out
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Write to a temp file in the same directory, then atomically replace the
+    # output. If the write fails partway through, output_path is untouched.
+    tmp_path: Path | None = None
     try:
-        with open(source_path, encoding="utf-8") as infile, open(output_path, "w", encoding="utf-8") as outfile:
+        fd, tmp_name = tempfile.mkstemp(dir=output_path.parent, suffix=".tmp")
+        tmp_path = Path(tmp_name)
+        with open(source_path, encoding="utf-8") as infile, os.fdopen(fd, "w", encoding="utf-8") as outfile:
             for line in infile:
                 # Preserve line ending style, but work with stripped version
                 line_rstrip = line.rstrip("\n\r")
@@ -238,6 +245,9 @@ def merge_ini_files(source_path: str | Path, overrides_dict: dict[str, str], out
                     # Keep original line (but with clean key, no metadata)
                     new_line = f"{clean_key}={value}{original_ending}"
                     outfile.write(new_line)
-
+        tmp_path.replace(output_path)
+        tmp_path = None
     except Exception as e:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
         raise OSError(f"Error merging INI files: {e}") from e

@@ -66,6 +66,14 @@ class AppSettings:
     )
     DEFAULT_CHANNEL = CHANNEL_LIVE
 
+    # Common RSI installation root candidates for auto-detection (no channel suffix).
+    # Used by ensure_default_settings(), get_sc_install_root(), and
+    # get_game_install_path() — single source of truth for these literals.
+    _RSI_DEFAULT_ROOTS = (
+        r"C:\Program Files\Roberts Space Industries\StarCitizen",
+        r"C:\Program Files (x86)\Roberts Space Industries\StarCitizen",
+    )
+
     # Enhancements cache filenames (written by generate_enhancements_ini.py into cache dir)
     ENHANCEMENTS_FILES = {
         "ship_descs": "ships_desc_enhancements.ini",
@@ -257,10 +265,8 @@ class AppSettings:
         if saved:
             return saved
 
-        for candidate in [
-            r"C:\Program Files\Roberts Space Industries\StarCitizen\LIVE",
-            r"C:\Program Files (x86)\Roberts Space Industries\StarCitizen\LIVE",
-        ]:
+        for root in AppSettings._RSI_DEFAULT_ROOTS:
+            candidate = str(Path(root) / AppSettings.DEFAULT_CHANNEL)
             if Path(candidate).exists():
                 return candidate
 
@@ -441,10 +447,7 @@ class AppSettings:
         # Auto-seed SC install root only if missing and SC is at a standard location.
         # Non-standard install paths must be set via Browse in the Config tab.
         if not settings.value(AppSettings.SC_INSTALL_ROOT, ""):
-            for candidate in [
-                r"C:\Program Files\Roberts Space Industries\StarCitizen",
-                r"C:\Program Files (x86)\Roberts Space Industries\StarCitizen",
-            ]:
+            for candidate in AppSettings._RSI_DEFAULT_ROOTS:
                 if Path(candidate).exists():
                     AppSettings.set_sc_install_root(candidate)
                     break
@@ -619,10 +622,7 @@ class AppSettings:
                 return str(legacy_path.parent)
             return legacy  # assume it was already a root
 
-        for candidate in [
-            r"C:\Program Files\Roberts Space Industries\StarCitizen",
-            r"C:\Program Files (x86)\Roberts Space Industries\StarCitizen",
-        ]:
+        for candidate in AppSettings._RSI_DEFAULT_ROOTS:
             if Path(candidate).exists():
                 return candidate
         return ""

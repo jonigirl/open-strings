@@ -664,17 +664,21 @@ class MainWindow(QMainWindow):
                 # Find all existing backups
                 backup_files = sorted(backup_dir.glob("global.ini.bak_*"), key=lambda f: f.stat().st_mtime)
 
-                # Delete oldest backup if we already have 5
-                if len(backup_files) >= _MAX_BACKUPS:
-                    oldest_backup = backup_files[0]
-                    oldest_backup.unlink()
-                    logger.info(f"Deleted oldest backup: {oldest_backup.name}")
-
-                # Create new backup
+                # Create new backup first — so we never lose a backup slot if
+                # the copy fails (e.g. disk full).
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 backup_path = backup_dir / f"global.ini.bak_{timestamp}"
                 shutil.copy2(target_path, backup_path)
                 logger.info(f"Backed up existing file to {backup_path}")
+
+                # Prune oldest backup now that the new one is confirmed.
+                if len(backup_files) >= _MAX_BACKUPS:
+                    oldest_backup = backup_files[0]
+                    try:
+                        oldest_backup.unlink()
+                        logger.info(f"Deleted oldest backup: {oldest_backup.name}")
+                    except OSError as prune_err:
+                        logger.warning(f"Could not delete oldest backup {oldest_backup.name}: {prune_err}")
 
             # Build final merged dict by re-merging all sources with user edits
             # This ensures Apply uses the latest source versions (catches any file
@@ -1771,7 +1775,7 @@ class MainWindow(QMainWindow):
         if self._spinner_label is not None:
             return
         self._spinner_label = QLabel()
-        self._spinner_label.setStyleSheet("font-size: 13px; padding: 2px 4px;")
+        self._spinner_label.setStyleSheet("font-size: 20px; padding: 0px 4px;")
         self._spinner_label.setVisible(False)
         self._status_bar().addPermanentWidget(self._spinner_label)
         timer = QTimer(self)
