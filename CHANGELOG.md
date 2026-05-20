@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.9] - 2026-05-20
+
+### Added
+
+- Installer now reads the RSI Launcher's settings file to auto-detect the Star Citizen
+  install path during setup — most users no longer need to browse for it manually
+- App settings also fall back to the RSI Launcher path on first launch if no path
+  has been configured
+- Uninstaller now offers to remove the DataForge game data cache (~1.4 GB) as an
+  optional cleanup step
+
+### Fixed
+
+- App settings are now stored as a plain JSON file in `%APPDATA%` instead of the
+  Windows registry — settings survive reinstalls and are portable between machines
+- Star Citizen install path chosen during installation is now correctly applied on
+  the app's first launch — previously it was silently ignored when a `settings.json`
+  already existed from a prior install
+- Workers module failed to load on startup due to a stale import reference introduced
+  when the string-loading service was moved — corrected
+- Status bar text was clipped on narrower windows; body font size increased to 11 pt
+- Variant string resolution now prefers the richer (longer) value when an `_SCItem`
+  mirror key and its canonical form conflict — prevents short or empty values winning
+
+### Changed
+
+- Activity spinner in the status bar now alternates between light blue and light
+  pink while operations are in progress
+
 ## [1.3.1] - 2026-05-20
 
 ### Fixed
@@ -131,6 +160,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Check for Updates feature
 - Test suite with CI coverage enforcement
 
+[1.3.9]: https://github.com/jonigirl/open-strings/compare/v1.3.0...v1.3.9
+[1.3.1]: https://github.com/jonigirl/open-strings/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/jonigirl/open-strings/releases/tag/v1.3.0
 [1.2.0]: https://github.com/jonigirl/open-strings/releases/tag/v1.2.0
 [1.1.2]: https://github.com/jonigirl/open-strings/releases/tag/v1.1.2
