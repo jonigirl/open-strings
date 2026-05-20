@@ -608,8 +608,6 @@ begin
       complete uninstall. This is safe — Inno Setup has already removed
       the Uninstall entry by the time usPostUninstall fires. }
     RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Joni Hayes\Open Strings');
-    { Remove the parent key too if now empty. }
-    RegDeleteKeyIfEmpty(HKCU, 'Software\Joni Hayes');
     Log('Removed app settings registry key');
   end;
 end;
