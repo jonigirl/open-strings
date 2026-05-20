@@ -202,6 +202,9 @@ class MainWindow(QMainWindow):
         self._tutorial_tour: TutorialTour | None = None
         self._channel_indicator: QLabel | None = None
         self._app_version_indicator: QLabel | None = None
+        self._spinner_label: QLabel | None = None
+        self._spinner_frame: int = 0
+        self._spinner_timer: QTimer | None = None
 
         # Build UI
         self.setup_ui()
@@ -324,6 +327,7 @@ class MainWindow(QMainWindow):
         # indicator so it lands leftmost in the permanent-widget zone
         # (QStatusBar lays these out left-to-right in addition order, with
         # the first-added sitting closest to the message text).
+        self._ensure_spinner()
         self._ensure_app_version_indicator()
 
         # Channel indicator on the right side of the status bar. Installed
@@ -1760,6 +1764,44 @@ class MainWindow(QMainWindow):
         self._app_version_indicator.setStyleSheet("font-size: 11px; padding: 2px 8px;")
         self._status_bar().addPermanentWidget(self._app_version_indicator)
 
+    _SPINNER_FRAMES = ("◐", "◓", "◑", "◒")
+
+    def _ensure_spinner(self) -> None:
+        """Install a hidden spinner label in the status bar. Shown during long operations."""
+        if self._spinner_label is not None:
+            return
+        self._spinner_label = QLabel()
+        self._spinner_label.setStyleSheet("font-size: 13px; padding: 2px 4px;")
+        self._spinner_label.setVisible(False)
+        self._status_bar().addPermanentWidget(self._spinner_label)
+        timer = QTimer(self)
+        timer.setInterval(200)
+        timer.timeout.connect(self._tick_spinner)
+        self._spinner_timer = timer
+
+    def _tick_spinner(self) -> None:
+        if self._spinner_label is None:
+            return
+        self._spinner_frame = (self._spinner_frame + 1) % len(self._SPINNER_FRAMES)
+        self._spinner_label.setText(self._SPINNER_FRAMES[self._spinner_frame])
+
+    def start_spinner(self) -> None:
+        """Show the status-bar activity spinner."""
+        if self._spinner_label is None:
+            return
+        self._spinner_frame = 0
+        self._spinner_label.setText(self._SPINNER_FRAMES[0])
+        self._spinner_label.setVisible(True)
+        if self._spinner_timer is not None:
+            self._spinner_timer.start()
+
+    def stop_spinner(self) -> None:
+        """Hide the status-bar activity spinner."""
+        if self._spinner_timer is not None:
+            self._spinner_timer.stop()
+        if self._spinner_label is not None:
+            self._spinner_label.setVisible(False)
+
     def _refresh_channel_indicator(self) -> None:
         """Update the status-bar channel label to reflect AppSettings.get_active_channel()."""
         if self._channel_indicator is None:
@@ -2373,6 +2415,7 @@ class MainWindow(QMainWindow):
         worker.error.connect(self._on_enhancements_generation_error)
         worker.finished.connect(self._on_enhancements_generation_finished)
         worker.start()
+        self.start_spinner()
 
     def _on_enhancements_generation_error(self, message: str):
         logger.error(f"Enhancements generation error: {message}")
@@ -2382,6 +2425,7 @@ class MainWindow(QMainWindow):
             self._enhancements_progress_dialog = None
 
     def _on_enhancements_generation_finished(self, success: bool):
+        self.stop_spinner()
         # Close progress dialog
         if self._enhancements_progress_dialog is not None:
             self._enhancements_progress_dialog.close()
@@ -2429,6 +2473,7 @@ class MainWindow(QMainWindow):
         self._forge_worker = DataForgeExtractWorker(p4k_path, unp4k_exe, unforge_exe, forge_dir)
         self.enhancements_tab.set_operation_running("Extracting DataForge from Data.p4k…")
         status_bar.showMessage("Extracting DataForge in background — this takes several minutes…")
+        self.start_spinner()
 
         progress_dialog = AnimatedProgressDialog(
             "Extracting DataForge from Data.p4k — this takes several minutes…",
@@ -2450,6 +2495,7 @@ class MainWindow(QMainWindow):
         logger.error(f"DataForge extraction error: {message}")
 
     def _on_dataforge_extract_finished(self, success: bool):
+        self.stop_spinner()
         if self._forge_progress_dialog is not None:
             self._forge_progress_dialog.close()
             self._forge_progress_dialog = None
@@ -2490,9 +2536,11 @@ class MainWindow(QMainWindow):
         self._p4k_worker.error.connect(lambda err: QMessageBox.warning(self, "Extraction Error", err))
         self._p4k_worker.finished.connect(self._on_p4k_extract_finished)
         self._p4k_worker.start()
+        self.start_spinner()
 
     def _on_p4k_extract_finished(self, success: bool):
         """Handle P4K extraction completion."""
+        self.stop_spinner()
         if self._p4k_progress is not None:
             self._p4k_progress.close()
         worker = self._p4k_worker
