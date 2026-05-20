@@ -57,6 +57,7 @@ var
   DataDirPage: TInputDirWizardPage;
   DataDirPromptShown: Boolean;
   DeleteToolsOnUninstall: Boolean;
+  DeleteCacheOnUninstall: Boolean;
   DeleteEditsOnUninstall: Boolean;
   UninstallEditsWarnLabel: TLabel;
 
@@ -370,6 +371,11 @@ begin
   UninstallEditsWarnLabel.Visible := TNewCheckBox(Sender).Checked;
 end;
 
+function GetLocalAppDataDir(): String;
+begin
+  Result := ExpandConstant('{localappdata}') + '\Open Strings';
+end;
+
 function ShowUninstallOptionsDialog: Boolean;
 var
   Form: TSetupForm;
@@ -377,13 +383,16 @@ var
   ToolsCheck: TNewCheckBox;
   ToolsPathLabel: TLabel;
   ToolsHintLabel: TLabel;
+  CacheCheck: TNewCheckBox;
+  CachePathLabel: TLabel;
+  CacheHintLabel: TLabel;
   EditsCheck: TNewCheckBox;
   EditsPathLabel: TLabel;
   Bevel: TNewStaticText;
   UninstallButton: TNewButton;
   CancelButton: TNewButton;
 begin
-  Form := CreateCustomForm(ScaleX(480), ScaleY(312), False, False);
+  Form := CreateCustomForm(ScaleX(480), ScaleY(390), False, False);
   try
     Form.Caption := 'Uninstall Open Strings';
     Form.Position := poScreenCenter;
@@ -398,6 +407,7 @@ begin
     DescLabel.WordWrap := True;
     DescLabel.Caption := 'Open Strings will be uninstalled. Choose what else to clean up:';
 
+    { ── Extraction tools ─────────────────────────────────────────────── }
     ToolsCheck := TNewCheckBox.Create(Form);
     ToolsCheck.Parent := Form;
     ToolsCheck.Left := ScaleX(20);
@@ -425,10 +435,39 @@ begin
     ToolsHintLabel.Caption := 'Safe to keep — reused automatically if you reinstall Open Strings.';
     ToolsHintLabel.Font.Color := clGray;
 
+    { ── Extracted game data cache ────────────────────────────────────── }
+    CacheCheck := TNewCheckBox.Create(Form);
+    CacheCheck.Parent := Form;
+    CacheCheck.Left := ScaleX(20);
+    CacheCheck.Top := ScaleY(138);
+    CacheCheck.Width := ScaleX(440);
+    CacheCheck.Height := ScaleY(20);
+    CacheCheck.Caption := 'Extracted game data cache  (up to ~2 GB)';
+    CacheCheck.Checked := True;
+
+    CachePathLabel := TLabel.Create(Form);
+    CachePathLabel.Parent := Form;
+    CachePathLabel.Left := ScaleX(38);
+    CachePathLabel.Top := ScaleY(162);
+    CachePathLabel.Width := ScaleX(422);
+    CachePathLabel.AutoSize := True;
+    CachePathLabel.Caption := GetLocalAppDataDir();
+    CachePathLabel.Font.Color := clGray;
+
+    CacheHintLabel := TLabel.Create(Form);
+    CacheHintLabel.Parent := Form;
+    CacheHintLabel.Left := ScaleX(38);
+    CacheHintLabel.Top := ScaleY(178);
+    CacheHintLabel.Width := ScaleX(422);
+    CacheHintLabel.AutoSize := True;
+    CacheHintLabel.Caption := 'Reproducible from Data.p4k if you reinstall. Safe to delete.';
+    CacheHintLabel.Font.Color := clGray;
+
+    { ── User edits and backups ───────────────────────────────────────── }
     EditsCheck := TNewCheckBox.Create(Form);
     EditsCheck.Parent := Form;
     EditsCheck.Left := ScaleX(20);
-    EditsCheck.Top := ScaleY(148);
+    EditsCheck.Top := ScaleY(210);
     EditsCheck.Width := ScaleX(440);
     EditsCheck.Height := ScaleY(20);
     EditsCheck.Caption := 'My edits and backups';
@@ -438,7 +477,7 @@ begin
     EditsPathLabel := TLabel.Create(Form);
     EditsPathLabel.Parent := Form;
     EditsPathLabel.Left := ScaleX(38);
-    EditsPathLabel.Top := ScaleY(172);
+    EditsPathLabel.Top := ScaleY(234);
     EditsPathLabel.Width := ScaleX(422);
     EditsPathLabel.AutoSize := True;
     EditsPathLabel.Caption := GetDocumentsDir();
@@ -447,7 +486,7 @@ begin
     UninstallEditsWarnLabel := TLabel.Create(Form);
     UninstallEditsWarnLabel.Parent := Form;
     UninstallEditsWarnLabel.Left := ScaleX(38);
-    UninstallEditsWarnLabel.Top := ScaleY(188);
+    UninstallEditsWarnLabel.Top := ScaleY(250);
     UninstallEditsWarnLabel.Width := ScaleX(422);
     UninstallEditsWarnLabel.Height := ScaleY(28);
     UninstallEditsWarnLabel.AutoSize := False;
@@ -456,10 +495,11 @@ begin
     UninstallEditsWarnLabel.Font.Color := clMaroon;
     UninstallEditsWarnLabel.Visible := False;
 
+    { ── Buttons ──────────────────────────────────────────────────────── }
     Bevel := TNewStaticText.Create(Form);
     Bevel.Parent := Form;
     Bevel.Left := 0;
-    Bevel.Top := ScaleY(246);
+    Bevel.Top := ScaleY(320);
     Bevel.Width := ScaleX(480);
     Bevel.Height := ScaleY(2);
     Bevel.Caption := '';
@@ -471,7 +511,7 @@ begin
     UninstallButton.Width := ScaleX(90);
     UninstallButton.Height := ScaleY(28);
     UninstallButton.Left := ScaleX(262);
-    UninstallButton.Top := ScaleY(260);
+    UninstallButton.Top := ScaleY(334);
     UninstallButton.ModalResult := mrOk;
     UninstallButton.Default := True;
 
@@ -481,13 +521,14 @@ begin
     CancelButton.Width := ScaleX(90);
     CancelButton.Height := ScaleY(28);
     CancelButton.Left := ScaleX(370);
-    CancelButton.Top := ScaleY(260);
+    CancelButton.Top := ScaleY(334);
     CancelButton.ModalResult := mrCancel;
     CancelButton.Cancel := True;
 
     if Form.ShowModal() = mrOk then
     begin
       DeleteToolsOnUninstall := ToolsCheck.Checked;
+      DeleteCacheOnUninstall := CacheCheck.Checked;
       DeleteEditsOnUninstall := EditsCheck.Checked;
       Result := True;
     end
@@ -506,6 +547,7 @@ end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   ToolsDir: String;
+  CacheDir: String;
   UserDataDir: String;
 begin
   if CurUninstallStep = usUninstall then
@@ -533,6 +575,19 @@ begin
       Log('Removed empty AppData\Open Strings directory')
     else
       Log('AppData\Open Strings directory kept (not empty or already gone)');
+    if DeleteCacheOnUninstall then
+    begin
+      CacheDir := GetLocalAppDataDir();
+      if DirExists(CacheDir) then
+      begin
+        Log('Deleting LocalAppData cache: ' + CacheDir);
+        DelTree(CacheDir, True, True, True);
+      end
+      else
+        Log('LocalAppData cache not found (nothing to delete): ' + CacheDir);
+    end
+    else
+      Log('Keeping LocalAppData cache as requested by user');
     if DeleteEditsOnUninstall then
     begin
       UserDataDir := GetDocumentsDir();
@@ -546,6 +601,16 @@ begin
     end
     else
       Log('Keeping user edits and backups as requested by user');
+  end;
+  if CurUninstallStep = usPostUninstall then
+  begin
+    { Remove the app settings registry key so no trace remains after a
+      complete uninstall. This is safe — Inno Setup has already removed
+      the Uninstall entry by the time usPostUninstall fires. }
+    RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Joni Hayes\Open Strings');
+    { Remove the parent key too if now empty. }
+    RegDeleteKeyIfEmpty(HKCU, 'Software\Joni Hayes');
+    Log('Removed app settings registry key');
   end;
 end;
 
