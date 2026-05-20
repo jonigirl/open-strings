@@ -5,8 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from PyQt6.QtCore import QSettings
-from src.utils.settings import AppSettings
+from src.utils.settings import AppSettings, _JsonSettingsStore
 
 pytestmark = pytest.mark.unit
 
@@ -17,18 +16,14 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture
 def isolated_qsettings(tmp_path, monkeypatch):
-    """Point QSettings at an in-memory / file-scoped store so tests don't
-    stomp on the real Windows Registry. Uses IniFormat under tmp_path which
-    QSettings will use when we force the format + path."""
-    settings_file = tmp_path / "test_registry.ini"
-    # Swap out AppSettings.settings() for a QSettings instance backed by our
-    # temp file. Scoped per test.
+    """Point the settings store at a temp file so tests don't touch the real
+    AppData JSON (or the Windows registry). Scoped per test."""
+    settings_file = tmp_path / "test_settings.json"
 
     def _isolated():
-        return QSettings(str(settings_file), QSettings.Format.IniFormat)
+        return _JsonSettingsStore(settings_file)
 
     monkeypatch.setattr(AppSettings, "settings", staticmethod(_isolated))
-    # Clear any lru_cache or cached state on AppSettings if added later.
     yield
     # Explicit cleanup not needed — tmp_path handles file removal.
 

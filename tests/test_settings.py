@@ -22,8 +22,7 @@ import json
 from pathlib import Path
 
 import pytest
-from PyQt6.QtCore import QSettings
-from src.utils.settings import AppSettings
+from src.utils.settings import AppSettings, _JsonSettingsStore
 
 pytestmark = pytest.mark.unit
 
@@ -34,10 +33,10 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture
 def isolated_qsettings(tmp_path, monkeypatch):
-    settings_file = tmp_path / "test_settings.ini"
+    settings_file = tmp_path / "test_settings.json"
 
     def _isolated():
-        return QSettings(str(settings_file), QSettings.Format.IniFormat)
+        return _JsonSettingsStore(settings_file)
 
     monkeypatch.setattr(AppSettings, "settings", staticmethod(_isolated))
     yield

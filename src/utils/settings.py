@@ -1,12 +1,170 @@
-"""Settings management using QSettings."""
+"""Settings management — Qt-free JSON backend."""
 
+import base64
+import json
 import logging
+import os
 import sys
+import threading
 from pathlib import Path
 
-from PyQt6.QtCore import QSettings
-
 logger = logging.getLogger(__name__)
+
+# Tag prepended to base64-encoded bytes values so we can distinguish them
+# from plain strings when reading back from the JSON file.
+_BYTES_TAG = "@bytes:"
+
+
+class _JsonSettingsStore:
+    """Minimal QSettings-compatible settings store backed by a JSON file.
+
+    Implements the value() / setValue() / remove() / sync() subset that
+    AppSettings uses, so tests can monkeypatch AppSettings.settings() to
+    return a store pointed at a temp file without touching QSettings at all.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+        self._data: dict = {}
+        self._lock = threading.Lock()
+        self._load()
+
+    def _load(self) -> None:
+        if self._path.exists():
+            try:
+                with open(self._path, encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    self._data = data
+            except Exception:
+                pass
+
+    def _flush(self) -> None:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self._path.with_suffix(".tmp")
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(self._data, f, indent=2)
+            tmp.replace(self._path)
+        except Exception:
+            tmp.unlink(missing_ok=True)
+            raise
+
+    def _get(self, key: str):
+        parts = key.split("/")
+        node = self._data
+        for part in parts:
+            if not isinstance(node, dict) or part not in node:
+                return None
+            node = node[part]
+        return node
+
+    def _set(self, key: str, value) -> None:
+        parts = key.split("/")
+        node = self._data
+        for part in parts[:-1]:
+            if part not in node or not isinstance(node[part], dict):
+                node[part] = {}
+            node = node[part]
+        node[parts[-1]] = value
+
+    def _del(self, key: str) -> None:
+        parts = key.split("/")
+        node = self._data
+        for part in parts[:-1]:
+            if not isinstance(node, dict) or part not in node:
+                return
+            node = node[part]
+        if isinstance(node, dict):
+            node.pop(parts[-1], None)
+
+    def value(self, key: str, default=None, type=None):  # noqa: A002
+        with self._lock:
+            raw = self._get(key)
+        if raw is None:
+            return default
+        if isinstance(raw, str) and raw.startswith(_BYTES_TAG):
+            return base64.b64decode(raw[len(_BYTES_TAG) :])
+        if type is bool:
+            if isinstance(raw, bool):
+                return raw
+            if isinstance(raw, str):
+                return raw.lower() in ("true", "1", "yes")
+            return bool(raw)
+        if type is int:
+            try:
+                return int(raw)
+            except (TypeError, ValueError):
+                return default
+        return raw
+
+    def setValue(self, key: str, value) -> None:
+        with self._lock:
+            if isinstance(value, (bytes, bytearray)):
+                value = _BYTES_TAG + base64.b64encode(bytes(value)).decode("ascii")
+            self._set(key, value)
+            self._flush()
+
+    def remove(self, key: str) -> None:
+        with self._lock:
+            self._del(key)
+            self._flush()
+
+    def sync(self) -> None:
+        """No-op: all writes are flushed immediately in setValue/remove."""
+
+
+def _migrate_from_registry(store: _JsonSettingsStore, org: str, app: str) -> None:
+    """One-shot migration from QSettings NativeFormat registry key to JSON.
+
+    Called once when the JSON file doesn't exist yet.  Reads all values
+    recursively from HKCU\\Software\\{org}\\{app} and writes them into
+    *store*, then flushes once.  Non-fatal on any error — worst case the
+    user re-enters their settings.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import winreg
+
+        root_reg_path = f"Software\\{org}\\{app}"
+
+        def _enumerate(key_handle, json_prefix: str, reg_sub: str) -> None:
+            i = 0
+            while True:
+                try:
+                    name, data, _ = winreg.EnumValue(key_handle, i)
+                    json_key = f"{json_prefix}/{name}" if json_prefix else name
+                    encoded = (
+                        _BYTES_TAG + base64.b64encode(bytes(data)).decode("ascii")
+                        if isinstance(data, (bytes, bytearray))
+                        else data
+                    )
+                    store._set(json_key, encoded)
+                    i += 1
+                except OSError:
+                    break
+            i = 0
+            while True:
+                try:
+                    subkey_name = winreg.EnumKey(key_handle, i)
+                    sub_reg = f"{reg_sub}\\{subkey_name}" if reg_sub else subkey_name
+                    sub_json = f"{json_prefix}/{subkey_name}" if json_prefix else subkey_name
+                    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, f"{root_reg_path}\\{sub_reg}") as sub:
+                        _enumerate(sub, sub_json, sub_reg)
+                    i += 1
+                except OSError:
+                    break
+
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, root_reg_path) as root_key:
+                _enumerate(root_key, "", "")
+            store._flush()
+            logger.info("Migrated settings from Windows registry to JSON.")
+        except OSError:
+            pass
+    except Exception as e:
+        logger.warning(f"Registry migration failed (non-fatal): {e}")
 
 
 class AppSettings:
@@ -145,9 +303,18 @@ class AppSettings:
     AVAILABLE_SOURCES = [SOURCE_GLOBAL, SOURCE_USER]
 
     @staticmethod
-    def settings() -> QSettings:
-        """Get QSettings instance."""
-        return QSettings(AppSettings.ORG_NAME, AppSettings.APP_NAME)
+    def _get_settings_path() -> Path:
+        appdata = Path(os.environ.get("APPDATA", str(Path.home() / "AppData" / "Roaming")))
+        return appdata / AppSettings.ORG_NAME / AppSettings.APP_NAME / "settings.json"
+
+    @staticmethod
+    def settings() -> _JsonSettingsStore:
+        """Return the application settings store, migrating from registry on first run."""
+        path = AppSettings._get_settings_path()
+        store = _JsonSettingsStore(path)
+        if not path.exists():
+            _migrate_from_registry(store, AppSettings.ORG_NAME, AppSettings.APP_NAME)
+        return store
 
     @staticmethod
     def get_enhancements_enabled() -> bool:
@@ -534,7 +701,6 @@ class AppSettings:
         Returns:
             Path to the resolved directory (created if needed).
         """
-        import os
 
         override = AppSettings._get_user_data_dir_override()
         if override:
@@ -558,7 +724,6 @@ class AppSettings:
         Writes to the per-user QSettings registry node (same scope as every
         other AppSettings value), so it survives reinstalls.
         """
-        import os
 
         settings = AppSettings.settings()
         if not path:
@@ -743,7 +908,6 @@ class AppSettings:
         Idempotent: no-ops when the old path is already absent. If the new
         location already exists the old directory is simply cleaned up.
         """
-        import os
         import shutil
 
         old_dir = AppSettings.get_cache_dir() / "dataforge"
@@ -776,7 +940,6 @@ class AppSettings:
         Stored under AppData\\Local (not Documents) so the ~1.4 GB XML tree
         stays outside the OneDrive sync scope.
         """
-        import os
 
         local_appdata = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
         cache_dir = local_appdata / "Open Strings" / AppSettings.get_active_channel() / "cache" / "dataforge"
