@@ -342,11 +342,6 @@ def extract_dataforge(
         if result.returncode != 0:
             raise RuntimeError(f"unp4k.exe failed (code {result.returncode}):\n{result.stderr or result.stdout}")
 
-        # Explicit cleanup: ensure subprocess is fully released
-        del result
-        gc.collect()
-        time.sleep(0.1)  # Brief pause for file system to release locks
-
         # unp4k preserves archive structure: Data/Game2.dcb
         dcb_candidates = list(tmp.glob("Data/Game*.dcb"))
         if not dcb_candidates:
@@ -377,11 +372,6 @@ def extract_dataforge(
             logger.info(f"unforge stderr ({len(_stderr)} bytes, truncated): {_stderr[:2000]}")
         if result.returncode != 0:
             raise RuntimeError(f"unforge.exe failed (code {result.returncode}):\n{_stderr or _stdout or '(no output)'}")
-
-        # Explicit cleanup: ensure subprocess is fully released
-        del result
-        gc.collect()
-        time.sleep(0.1)  # Brief pause for file system to release locks
 
         # unforge writes entity XMLs into a libs/ subdirectory next to the
         # dcb file. When it's missing we surface whatever we captured from
@@ -419,10 +409,6 @@ def extract_dataforge(
         if progress_pct_callback:
             progress_pct_callback(2, TOTAL_PHASES, "Caching entity files…")
 
-        # Ensure all file handles from extraction are released before copying
-        gc.collect()
-        time.sleep(0.1)
-
         # Blow away any prior cache. Uses a retry loop because on Windows
         # (particularly under OneDrive) a transient handle from the
         # just-exited unforge.exe or from the OneDrive/Defender/indexer
@@ -459,8 +445,6 @@ def extract_dataforge(
         )
         logger.info("Diff manifest written")
 
-    # Ensure all file handles are released before returning
-    gc.collect()
     if progress_pct_callback:
         progress_pct_callback(3, TOTAL_PHASES, "Done")
     return True

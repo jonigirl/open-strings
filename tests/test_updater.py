@@ -91,7 +91,7 @@ def test_download_file_reraises_on_oserror(tmp_path):
 
 def _make_simple_urlopen_mock(data: bytes):
     response = MagicMock()
-    response.read.return_value = data
+    response.read.side_effect = [data, b""]
     cm = MagicMock()
     cm.__enter__ = MagicMock(return_value=response)
     cm.__exit__ = MagicMock(return_value=False)

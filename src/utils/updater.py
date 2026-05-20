@@ -101,9 +101,17 @@ def download_file_if_changed(url: str, output_path: str | Path) -> bool:
     req = Request(url, headers=headers)
     try:
         with urlopen(req, timeout=60) as response:
-            data = response.read(_MAX_DOWNLOAD_BYTES + 1)
-        if len(data) > _MAX_DOWNLOAD_BYTES:
-            raise ValueError(f"Download exceeds {_MAX_DOWNLOAD_BYTES // 1_048_576} MB limit: {url!r}")
+            chunks: list[bytes] = []
+            total = 0
+            while True:
+                chunk = response.read(65536)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > _MAX_DOWNLOAD_BYTES:
+                    raise ValueError(f"Download exceeds {_MAX_DOWNLOAD_BYTES // 1_048_576} MB limit: {url!r}")
+                chunks.append(chunk)
+            data = b"".join(chunks)
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(data)

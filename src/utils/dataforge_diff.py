@@ -155,7 +155,7 @@ def update_manifest(
     cache_dir = Path(cache_dir)
     snapshot = _build_snapshot(cache_dir, progress_callback=progress_callback)
     with open(_manifest_path(cache_dir), "w", encoding="utf-8") as f:
-        json.dump(snapshot, f, indent=2)
+        json.dump(snapshot, f, separators=(",", ":"))
 
 
 def dirty_categories(cache_dir: Path) -> set[str] | None:
