@@ -74,6 +74,9 @@ def download_tools(
         _report(progress_callback, f"Downloading {name}…")
         logger.info(f"Downloading {name} from {url}")
 
+        if not url.startswith("https://"):
+            raise ValueError(f"Only HTTPS URLs are accepted for downloads; got: {url!r}")
+
         tmp_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp_file:

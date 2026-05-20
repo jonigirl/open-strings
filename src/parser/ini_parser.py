@@ -106,17 +106,17 @@ def load_source_files(
 
     # Handle legacy custom_path parameter
     if custom_path and not user_overrides:
-        logger.info(f"Loading user overrides from legacy path: {custom_path}")
+        logger.debug(f"Loading user overrides from legacy path: {custom_path}")
         user_overrides = parse_ini_file(custom_path)
 
-    logger.info(
+    logger.debug(
         f"Starting merge of {sum(len(d) for d in sources_dict.values())} total keys from {len(sources_dict)} sources"
     )
-    logger.info(f"Hierarchy: {hierarchy}, Sources available: {list(sources_dict.keys())}")
+    logger.debug(f"Hierarchy: {hierarchy}, Sources available: {list(sources_dict.keys())}")
 
     # Filter hierarchy to only include sources that exist in sources_dict
     filtered_hierarchy = [s for s in hierarchy if s in sources_dict]
-    logger.info(f"Filtered hierarchy: {filtered_hierarchy}")
+    logger.debug(f"Filtered hierarchy: {filtered_hierarchy}")
 
     from src.utils.settings import AppSettings
 
@@ -137,27 +137,27 @@ def load_source_files(
     base_sources = {k: v for k, v in filtered_sources.items() if k != AppSettings.SOURCE_USER}
 
     try:
-        logger.info("Calling merge_sources_by_hierarchy (base only, no user)...")
+        logger.debug("Calling merge_sources_by_hierarchy (base only, no user)...")
         base_merged = merge_sources_by_hierarchy(base_sources, base_hierarchy, None)
-        logger.info(f"Base merge complete. Result has {len(base_merged)} keys")
+        logger.debug(f"Base merge complete. Result has {len(base_merged)} keys")
     except Exception as e:
         logger.exception(f"Error during merge: {e}")
         raise
 
     # Track which base source each key came from (for status of non-user entries)
-    logger.info("Tracking source origin for each key...")
+    logger.debug("Tracking source origin for each key...")
     source_origin: dict[str, str] = {}
     for source_name in base_hierarchy:
         source_data = base_sources[source_name]
         for key in source_data.keys():
             source_origin[key] = source_name
-    logger.info(f"Source origin tracking complete. {len(source_origin)} keys tracked")
+    logger.debug(f"Source origin tracking complete. {len(source_origin)} keys tracked")
 
     # Build the full key universe: all base keys + user-only "New" keys
     all_keys = set(base_merged.keys()) | set(effective_user_overrides.keys())
 
     # Create StringEntry for each key
-    logger.info("Creating StringEntry objects...")
+    logger.debug("Creating StringEntry objects...")
     base_source = base_hierarchy[0] if base_hierarchy else "global"
     entry_count = 0
     for key in all_keys:
@@ -248,7 +248,7 @@ def load_sources_from_settings() -> tuple[dict[str, dict[str, str]], list[str], 
             logger.debug(f"Source {source_name} has no path configured")
             continue
 
-        logger.info(f"Processing source {source_name}: {source_path}")
+        logger.debug(f"Processing source {source_name}: {source_path}")
 
         try:
             # Handle URLs vs local files
@@ -256,10 +256,10 @@ def load_sources_from_settings() -> tuple[dict[str, dict[str, str]], list[str], 
                 # For remote sources, load from cached local file in AppData (must exist)
                 if source_name in cache_mapping:
                     cache_file = cache_dir / cache_mapping[source_name]
-                    logger.info(f"Looking for cache file: {cache_file}")
+                    logger.debug(f"Looking for cache file: {cache_file}")
 
                     if cache_file.exists():
-                        logger.info(f"Cache file found, parsing {source_name}...")
+                        logger.debug(f"Cache file found, parsing {source_name}...")
                         source_data = parse_ini_file(cache_file)
                         if source_data:
                             sources_dict[source_name] = source_data
@@ -274,7 +274,7 @@ def load_sources_from_settings() -> tuple[dict[str, dict[str, str]], list[str], 
                 continue
 
             # Local file path
-            logger.info(f"Loading local file {source_path}...")
+            logger.debug(f"Loading local file {source_path}...")
             local_file = Path(source_path)
 
             # User source can be empty on first run
@@ -285,9 +285,9 @@ def load_sources_from_settings() -> tuple[dict[str, dict[str, str]], list[str], 
                         sources_dict[source_name] = source_data
                         logger.info(f"Loaded {len(source_data)} entries from {source_name}")
                     else:
-                        logger.info(f"User overrides file is empty: {source_path}")
+                        logger.debug(f"User overrides file is empty: {source_path}")
                 else:
-                    logger.info(f"No user overrides yet: {source_path}")
+                    logger.debug(f"No user overrides yet: {source_path}")
                 continue
 
             # Other local sources must exist

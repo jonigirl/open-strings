@@ -17,7 +17,7 @@ from src.utils.perf import timed
 
 logger = logging.getLogger(__name__)
 
-_RMTREE_CB_KWARG = "onexc" if sys.version_info >= (3, 12) else "onerror"
+_RMTREE_CB_KWARG = "onexc"
 
 # Track active subprocesses by Python thread-id so they can be killed
 # from the main thread when the app closes mid-extraction.
