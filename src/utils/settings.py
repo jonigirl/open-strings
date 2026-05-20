@@ -37,7 +37,7 @@ class _JsonSettingsStore:
                 if isinstance(data, dict):
                     self._data = data
             except Exception:
-                pass
+                logger.warning("Could not load settings from %s — starting with empty store", self._path, exc_info=True)
 
     def _flush(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -107,7 +107,7 @@ class _JsonSettingsStore:
                 self._del(key)
                 self._flush()
                 return
-            if isinstance(value, (bytes, bytearray)):
+            if isinstance(value, bytes | bytearray):
                 value = _BYTES_TAG + base64.b64encode(bytes(value)).decode("ascii")
             self._set(key, value)
             self._flush()
@@ -144,7 +144,7 @@ def _migrate_from_registry(store: _JsonSettingsStore, org: str, app: str) -> Non
                     json_key = f"{json_prefix}/{name}" if json_prefix else name
                     encoded = (
                         _BYTES_TAG + base64.b64encode(bytes(data)).decode("ascii")
-                        if isinstance(data, (bytes, bytearray))
+                        if isinstance(data, bytes | bytearray)
                         else data
                     )
                     store._set(json_key, encoded)
