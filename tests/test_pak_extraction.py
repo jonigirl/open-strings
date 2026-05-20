@@ -20,10 +20,10 @@ import pytest
 from src.utils.pak_extractor import (
     DATAFORGE_KEEP_SUBPATHS,
     _copy_filtered_records,
-    _robust_rmtree,
     dataforge_cache_is_fresh,
     extract_dataforge,
     extract_global_ini,
+    robust_rmtree,
 )
 
 
@@ -300,11 +300,11 @@ class TestRobustRmtree:
         target = tmp_path / "to_delete"
         target.mkdir()
         (target / "file.txt").write_text("hi", encoding="utf-8")
-        _robust_rmtree(target)
+        robust_rmtree(target)
         assert not target.exists()
 
     def test_succeeds_silently_when_path_missing(self, tmp_path):
-        _robust_rmtree(tmp_path / "nonexistent")
+        robust_rmtree(tmp_path / "nonexistent")
 
     def test_removes_read_only_files(self, tmp_path):
         target = tmp_path / "ro_dir"
@@ -312,7 +312,7 @@ class TestRobustRmtree:
         ro_file = target / "readonly.txt"
         ro_file.write_text("data", encoding="utf-8")
         ro_file.chmod(stat.S_IREAD)
-        _robust_rmtree(target)
+        robust_rmtree(target)
         assert not target.exists()
 
     def test_raises_after_all_attempts_fail(self, tmp_path, monkeypatch):
@@ -331,7 +331,7 @@ class TestRobustRmtree:
         monkeypatch.setattr(shutil, "rmtree", _always_fail)
         monkeypatch.setattr("time.sleep", lambda _: None)
         with pytest.raises(OSError):
-            _robust_rmtree(target, attempts=3)
+            robust_rmtree(target, attempts=3)
         assert call_count["n"] == 3
 
 

@@ -1,10 +1,15 @@
 """Main window for Open Strings."""
 
 import html as _html_mod
+import json
 import logging
 import os
 import re as _re_mod
+import shutil
+import tempfile
+import time
 from collections import Counter
+from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtCore import QModelIndex, Qt, QTimer, QUrl, pyqtSlot
@@ -650,9 +655,6 @@ class MainWindow(QMainWindow):
         target_path = AppSettings.get_global_ini_path()
 
         try:
-            import shutil
-            from datetime import datetime
-
             target_path.parent.mkdir(parents=True, exist_ok=True)
 
             backup_path = None  # Tracks the backup created this apply (used for restore on validation failure)
@@ -953,9 +955,9 @@ class MainWindow(QMainWindow):
                 # Shared helper — retries with backoff, clears read-only bits,
                 # and outlasts OneDrive/Defender/indexer locks that commonly
                 # reject the first attempt with WinError 5.
-                from src.utils.pak_extractor import _robust_rmtree
+                from src.utils.pak_extractor import robust_rmtree
 
-                _robust_rmtree(dataforge_dir)
+                robust_rmtree(dataforge_dir)
                 deleted.append("dataforge/")
                 logger.info("Deleted DataForge cache directory")
             except Exception as e:
@@ -1154,7 +1156,6 @@ class MainWindow(QMainWindow):
 
     def _handle_import_ini(self):
         """Handle Import INI button: get source, validate, resolve conflicts, merge."""
-        import tempfile
 
         from PyQt6.QtWidgets import (
             QDialog,
@@ -1362,8 +1363,6 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            import shutil
-
             target_path = AppSettings.get_global_ini_path()
             backup_file_path = Path(backup_file)
 
@@ -1530,7 +1529,6 @@ class MainWindow(QMainWindow):
         has no matching wiring are skipped with a warning (so a typo in the
         JSON surfaces in the Log Tab rather than crashing the tour).
         """
-        import json
 
         wiring = self._tutorial_step_wiring()
 
@@ -1628,8 +1626,6 @@ class MainWindow(QMainWindow):
         regardless of outcome.  A second call while a check is already
         running is silently ignored.
         """
-        import time
-
         if self._update_checker_worker is not None and self._update_checker_worker.isRunning():
             return
 

@@ -25,7 +25,7 @@ _active_procs: dict[int, subprocess.Popen] = {}
 _active_procs_lock = threading.Lock()
 
 
-def _robust_rmtree(path: Path, attempts: int = 6) -> None:
+def robust_rmtree(path: Path, attempts: int = 6) -> None:
     """Delete *path* recursively, surviving transient Windows locks.
 
     On Windows — especially when the target lives under OneDrive — rmtree
@@ -414,7 +414,7 @@ def extract_dataforge(
         # just-exited unforge.exe or from the OneDrive/Defender/indexer
         # stack can reject the first few rmdir attempts with WinError 5.
         if dataforge_cache_dir.exists():
-            _robust_rmtree(dataforge_cache_dir)
+            robust_rmtree(dataforge_cache_dir)
         dataforge_cache_dir.mkdir(parents=True, exist_ok=True)
 
         # Cache only the subtrees the enhancement generator actually reads.
