@@ -142,7 +142,7 @@ class FileLoaderWorker(QThread):
 
     def run(self) -> None:
         from src.gui.string_table_model import _group_sort_key
-        from src.parser.ini_parser import load_source_files, load_sources_from_settings
+        from src.utils.string_loader import load_source_files, load_sources_from_settings
 
         try:
             logger.info("FileLoaderWorker starting...")

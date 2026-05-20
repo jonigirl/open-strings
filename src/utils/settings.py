@@ -46,9 +46,12 @@ class _JsonSettingsStore:
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(self._data, f, indent=2)
             tmp.replace(self._path)
-        except Exception:
-            tmp.unlink(missing_ok=True)
-            raise
+        except Exception as exc:
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
+            raise exc
 
     def _get(self, key: str):
         parts = key.split("/")
@@ -100,6 +103,10 @@ class _JsonSettingsStore:
 
     def setValue(self, key: str, value) -> None:
         with self._lock:
+            if value is None:
+                self._del(key)
+                self._flush()
+                return
             if isinstance(value, (bytes, bytearray)):
                 value = _BYTES_TAG + base64.b64encode(bytes(value)).decode("ascii")
             self._set(key, value)

@@ -431,3 +431,99 @@ class TestEnsureUserIni:
         ini.write_text("[section]\n", encoding="utf-8")
         AppSettings.ensure_user_ini_file()
         assert ini.read_text(encoding="utf-8") == "[section]\n"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _JsonSettingsStore — direct contract tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestJsonSettingsStore:
+    @pytest.fixture
+    def store(self, tmp_path):
+        from src.utils.settings import _JsonSettingsStore
+
+        return _JsonSettingsStore(tmp_path / "store.json")
+
+    def test_missing_key_returns_default(self, store):
+        assert store.value("no/such/key") is None
+        assert store.value("no/such/key", default="fallback") == "fallback"
+
+    def test_roundtrip_string(self, store):
+        store.setValue("section/key", "hello")
+        assert store.value("section/key") == "hello"
+
+    def test_remove_existing_key(self, store):
+        store.setValue("a/b", "val")
+        store.remove("a/b")
+        assert store.value("a/b") is None
+
+    def test_remove_missing_key_does_not_raise(self, store):
+        store.remove("does/not/exist")
+
+    def test_set_value_none_deletes_key(self, store):
+        store.setValue("a/b", "something")
+        store.setValue("a/b", None)
+        assert store.value("a/b") is None
+
+    def test_value_type_bool_native_true(self, store):
+        store.setValue("flag", True)
+        assert store.value("flag", type=bool) is True
+
+    def test_value_type_bool_native_false(self, store):
+        store.setValue("flag", False)
+        assert store.value("flag", type=bool) is False
+
+    def test_value_type_bool_string_true(self, store):
+        store.setValue("flag", "true")
+        assert store.value("flag", type=bool) is True
+
+    def test_value_type_bool_string_false(self, store):
+        store.setValue("flag", "false")
+        assert store.value("flag", type=bool) is False
+
+    def test_value_type_bool_string_one(self, store):
+        store.setValue("flag", "1")
+        assert store.value("flag", type=bool) is True
+
+    def test_value_type_bool_string_zero(self, store):
+        store.setValue("flag", "0")
+        assert store.value("flag", type=bool) is False
+
+    def test_value_type_int_roundtrip(self, store):
+        store.setValue("epoch", 1_700_000_000)
+        assert store.value("epoch", type=int) == 1_700_000_000
+
+    def test_value_type_int_bad_value_returns_default(self, store):
+        store.setValue("epoch", "not-a-number")
+        assert store.value("epoch", type=int, default=0) == 0
+
+    def test_bytes_roundtrip(self, store):
+        data = b"\x00\x01\x02\xff"
+        store.setValue("geo", data)
+        assert store.value("geo") == data
+
+    def test_bytes_empty_roundtrip(self, store):
+        store.setValue("geo", b"")
+        assert store.value("geo") == b""
+
+    def test_bytes_survive_reload_from_disk(self, tmp_path):
+        from src.utils.settings import _JsonSettingsStore
+
+        path = tmp_path / "reload.json"
+        s1 = _JsonSettingsStore(path)
+        s1.setValue("geo", b"\xde\xad\xbe\xef")
+        s2 = _JsonSettingsStore(path)
+        assert s2.value("geo") == b"\xde\xad\xbe\xef"
+
+    def test_persist_survives_reload(self, tmp_path):
+        from src.utils.settings import _JsonSettingsStore
+
+        path = tmp_path / "persist.json"
+        _JsonSettingsStore(path).setValue("x/y", "abc")
+        assert _JsonSettingsStore(path).value("x/y") == "abc"
+
+    def test_sync_is_noop(self, store):
+        store.setValue("k", "v")
+        store.sync()
+        assert store.value("k") == "v"
