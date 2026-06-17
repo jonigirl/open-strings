@@ -24,7 +24,6 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
-    QProgressDialog,
     QPushButton,
     QSizePolicy,
     QStatusBar,
@@ -46,11 +45,6 @@ from src.gui.theme import BRAND_FONT_FAMILY, get_button_color, get_button_text_c
 from src.gui.workers import (
     AnimatedProgressDialog,
     AppUpdateCheckerWorker,
-    DataForgeExtractWorker,
-    EnhancementsGeneratorWorker,
-    FileLoaderWorker,
-    P4kExtractWorker,
-    StartupSyncWorker,
     get_resource_path,
 )
 from src.merger.ini_merger import merge_sources_by_hierarchy
@@ -163,35 +157,13 @@ class MainWindow(QMainWindow):
         self.filtered_row_indices: list[int] = []
         self.default_values: dict[str, str] = {}  # Store default values from cached base source
 
-        # File loader worker
-        self._loader_worker: FileLoaderWorker | None = None
-
-        # Startup sync worker
-        self._startup_sync_worker: StartupSyncWorker | None = None
-
-        # App update checker worker
+        # App update checker worker (Phase 6: deferred from WorkerCoordinator)
         self._update_checker_worker: AppUpdateCheckerWorker | None = None
-
-        # P4K extraction worker and progress dialog
-        self._p4k_worker: P4kExtractWorker | None = None
-        self._p4k_progress: QProgressDialog | None = None
-
-        # Enhancements generation worker
-        self._enhancements_worker: EnhancementsGeneratorWorker | None = None
-        self._enhancements_progress_dialog: AnimatedProgressDialog | None = None
-
-        # DataForge extraction worker
-        self._forge_worker: DataForgeExtractWorker | None = None
-        self._forge_progress_dialog: AnimatedProgressDialog | None = None
 
         # Track whether we've prompted for enhancements on startup (prevents duplicate dialogs)
         self._enhancements_prompted_on_startup = False
         # Flag to defer enhancements checking until after file loading completes (avoid I/O contention)
         self._check_enhancements_after_loading = False
-
-        # Progress dialogs
-        self._startup_progress: AnimatedProgressDialog | None = None
-        self._loading_progress: QProgressDialog | None = None
 
         self.help_dock: QDockWidget | None = None
         self._tutorial_tour: TutorialTour | None = None
@@ -201,12 +173,34 @@ class MainWindow(QMainWindow):
 
         self.status_bar_mgr = StatusBarManager(self)
 
+        # Worker coordinator — owns all background worker instances and progress dialogs
+        from src.gui.worker_coordinator import WorkerCoordinator  # noqa: PLC0415
+
+        self.worker_coord = WorkerCoordinator(self)
+
         # Build UI
         from src.gui import window_setup as _ws  # noqa: PLC0415
 
         self._ws = _ws
         self.setup_ui()
         self.restore_window_state()
+
+        # Wire coordinator signals to MainWindow result handlers.
+        # Done after setup_ui() so enhancements_tab is available.
+        self.worker_coord.loading_finished.connect(self._on_loading_finished)
+        self.worker_coord.loading_error.connect(self._on_loading_error)
+        self.worker_coord.p4k_finished.connect(self._on_p4k_extract_finished)
+        self.worker_coord.dataforge_operation_running.connect(self.enhancements_tab.set_operation_running)
+        self.worker_coord.dataforge_operation_progress.connect(self.enhancements_tab.set_operation_progress)
+        self.worker_coord.dataforge_finished.connect(self._on_dataforge_extract_finished)
+        self.worker_coord.enhancements_operation_running.connect(self.enhancements_tab.set_operation_running)
+        self.worker_coord.enhancements_operation_progress.connect(self.enhancements_tab.set_operation_progress)
+        self.worker_coord.enhancements_finished.connect(self._on_enhancements_generation_finished)
+        self.worker_coord.enhancements_error.connect(self._on_enhancements_generation_error)
+        self.worker_coord.startup_source_starting.connect(self._on_startup_source_starting)
+        self.worker_coord.startup_source_synced.connect(self._on_startup_source_synced)
+        self.worker_coord.startup_source_error.connect(self._on_startup_source_error)
+        self.worker_coord.startup_sync_finished.connect(self._on_startup_sync_finished)
 
         # Ensure cache directory exists
         AppSettings.get_cache_dir()
@@ -701,8 +695,8 @@ class MainWindow(QMainWindow):
 
         # Re-sync all remote sources so they're available for the next Apply.
         # The sync completion will also prompt for p4k extraction if base.ini is missing.
-        if self._startup_sync_worker is None:
-            self._start_startup_sync()
+        if not self.worker_coord.is_startup_sync_running():
+            self.worker_coord.start_startup_sync()
 
     @pyqtSlot()
     def export_locpack(self):
@@ -1400,14 +1394,7 @@ class MainWindow(QMainWindow):
         refreshes that would otherwise fall back to 'Ready' are suppressed
         during that window so in-progress messages aren't clobbered mid-run.
         """
-        workers = (
-            self._enhancements_worker,
-            self._forge_worker,
-            self._p4k_worker,
-            self._loader_worker,
-            self._startup_sync_worker,
-        )
-        return any(w is not None and w.isRunning() for w in workers)
+        return self.worker_coord.has_active_worker()
 
     def _ensure_spinner(self) -> None:
         """Delegate to status_bar_mgr (called from legacy code paths)."""
@@ -1549,37 +1536,12 @@ class MainWindow(QMainWindow):
         )
 
     def _start_startup_sync(self):
-        """Start async sync of all enabled remote sources, then load files when done.
-
-        If no remote sources need syncing, skip directly to loading.
-        """
-        # Check if any sources actually need syncing (remote URL + auto-update enabled)
-        has_remote_sync = any(
-            AppSettings.is_source_enabled(name)
-            and AppSettings.get_source_auto_update(name)
-            and AppSettings.get_source_path(name).startswith("http")
-            for name in AppSettings.AVAILABLE_SOURCES
-        )
-
-        if not has_remote_sync:
-            # Nothing to sync — go straight to loading
-            self._on_startup_sync_finished()
-            return
-
-        self._status_bar().showMessage("Starting up — syncing sources...")
-        self._startup_progress = AnimatedProgressDialog("Syncing sources...", parent=self, title="Starting Up")
-        self._startup_sync_worker = StartupSyncWorker()
-        self._startup_sync_worker.source_starting.connect(self._on_startup_source_starting)
-        self._startup_sync_worker.source_synced.connect(self._on_startup_source_synced)
-        self._startup_sync_worker.source_error.connect(self._on_startup_source_error)
-        self._startup_sync_worker.finished.connect(self._on_startup_sync_finished)
-        self._startup_sync_worker.start()
+        """Delegate to WorkerCoordinator.start_startup_sync."""
+        self.worker_coord.start_startup_sync()
 
     @pyqtSlot(str)
     def _on_startup_source_starting(self, source_name: str):
         self._status_bar().showMessage(f"Syncing {source_name}...")
-        if self._startup_progress is not None:
-            self._startup_progress.setLabelText(f"Syncing {source_name}...")
 
     @pyqtSlot(str, bool)
     def _on_startup_source_synced(self, source_name: str, updated: bool):
@@ -1595,39 +1557,16 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot()
     def _on_startup_sync_finished(self):
-        """Sync complete — clean up worker, check p4k freshness, then load sources."""
-        if self._startup_sync_worker:
-            self._startup_sync_worker.quit()
-            self._startup_sync_worker.wait()
-            self._startup_sync_worker = None
-
-        # Close the startup progress dialog before any modal prompts (P4K, enhancements)
-        if self._startup_progress is not None:
-            self._startup_progress.close()
-            self._startup_progress = None
-
-        # Prompt user to extract from p4k if base.ini is missing or outdated
+        """Sync complete — check p4k freshness, then load sources."""
         p4k_extraction_started = self._check_p4k_freshness()
 
-        # If P4K extraction was started, don't load files yet.
-        # The P4K extraction finished handler will do the loading.
         if p4k_extraction_started:
             return
 
-        # Base.ini is fine. Separately check the DataForge XML cache, which
-        # has its own freshness stamp (`.p4k_mtime`) and can be stale even
-        # when base.ini is current — e.g. the last DataForge extract was
-        # against an older Data.p4k, or the user patched the game since.
-        # Prompt but don't defer file loading: stale DataForge only affects
-        # enhancement regeneration, not the base strings in the table.
         self._maybe_prompt_dataforge_refresh()
 
-        # Don't check enhancements during startup - defer until after file loading completes
-        # to avoid concurrent I/O contention between file loader and enhancements generator
         self._check_enhancements_after_loading = True
-
-        # Show progress dialog during file loading
-        self._show_loading_progress()
+        self.worker_coord.start_file_loading()
 
     def _check_p4k_freshness(self) -> bool:
         """Prompt to extract from Data.p4k if base.ini is missing or outdated.
@@ -1845,46 +1784,8 @@ class MainWindow(QMainWindow):
         return None
 
     def _show_loading_progress(self, message: str = "Loading localization strings...") -> None:
-        """Show an animated progress dialog while loading files in a worker thread.
-
-        Uses FileLoaderWorker to load files asynchronously so the progress dialog
-        can animate properly. Shares the same progress dialog implementation as P4K extraction.
-
-        Args:
-            message: Status message to display in the progress dialog
-        """
-        # Guard against overlapping loads — clean up any prior worker first
-        if self._loader_worker is not None:
-            logger.warning("Previous FileLoaderWorker still exists — cleaning up before starting new load")
-            try:
-                self._loader_worker.finished.disconnect(self._on_loading_finished)
-                self._loader_worker.error.disconnect(self._on_loading_error)
-            except (TypeError, RuntimeError) as _disc_err:
-                # TypeError  — signal was never connected (harmless)
-                # RuntimeError — underlying C++ object already deleted (harmless)
-                # Any other exception propagates normally.
-                if "disconnect" not in str(_disc_err).lower() and not isinstance(_disc_err, TypeError):
-                    raise
-            if self._loader_worker.isRunning():
-                self._loader_worker.quit()
-                self._loader_worker.wait(5000)  # 5s timeout to avoid deadlock
-            self._loader_worker = None
-        if self._loading_progress is not None:
-            self._loading_progress.close()
-            self._loading_progress = None
-
-        # Load sources in background worker thread
-        self._loader_worker = FileLoaderWorker()
-
-        # Create reusable animated progress dialog
-        self._loading_progress = AnimatedProgressDialog(message, parent=self, title="Loading")
-
-        # Connect worker signals to progress dialog label updates
-        self._loader_worker.finished.connect(self._on_loading_finished)
-        self._loader_worker.error.connect(self._on_loading_error)
-        self._loader_worker.progress.connect(self._loading_progress.setLabelText)
-        self._loader_worker.progress_pct.connect(self._loading_progress.set_progress)
-        self._loader_worker.start()
+        """Delegate to WorkerCoordinator.start_file_loading."""
+        self.worker_coord.start_file_loading(message)
 
     @pyqtSlot(list, dict, list)
     @timed
@@ -1896,16 +1797,6 @@ class MainWindow(QMainWindow):
             default_values: Global source key→value dict (for the Default Value column).
             sort_keys: Pre-computed grouped sort keys (one per entry).
         """
-        # Close modal progress dialog and clean up worker FIRST so the modal
-        # event loop exits before heavy synchronous UI work.
-        if self._loading_progress is not None:
-            self._loading_progress.close()
-            self._loading_progress = None
-        if self._loader_worker is not None:
-            self._loader_worker.quit()
-            self._loader_worker.wait()
-            self._loader_worker = None
-
         # Preserve in-memory edits the user hasn't Applied yet — Generate
         # Enhancements (and other reload paths) hit this slot with freshly
         # loaded entries whose custom_value comes only from user.ini, so
@@ -1940,13 +1831,6 @@ class MainWindow(QMainWindow):
     @pyqtSlot(str)
     def _on_loading_error(self, error_msg: str):
         """Handle file loading error."""
-        if self._loading_progress is not None:
-            self._loading_progress.close()
-            self._loading_progress = None
-        if self._loader_worker is not None:
-            self._loader_worker.quit()
-            self._loader_worker.wait()
-            self._loader_worker = None
         if "No sources configured" in error_msg or "file not found" in error_msg.lower():
             self._status_bar().showMessage(
                 'Base localization file not found — use "Extract from Data.p4k" in the Config tab to get started.'
@@ -1956,203 +1840,60 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, "Error", f"Failed to load sources: {error_msg}")
 
     def _run_enhancements_pipeline(self):
-        """Entry point for the enhancements button: extract DataForge if needed, then generate enhancements."""
-        if self._enhancements_worker is not None or self._forge_worker is not None:
-            return  # already running
-
-        from src.utils.pak_extractor import dataforge_cache_is_fresh
-
-        forge_dir = AppSettings.get_dataforge_cache_dir()
-        p4k_path = AppSettings.get_p4k_path()
-
-        if dataforge_cache_is_fresh(p4k_path, forge_dir):
-            self._run_enhancements_generation()
-        else:
-            self._run_dataforge_extraction()
+        """Delegate to WorkerCoordinator.start_enhancements_pipeline."""
+        self.worker_coord.start_enhancements_pipeline()
 
     def _run_enhancements_generation(self, categories: set[str] | None = None):
-        """Launch EnhancementsGeneratorWorker in the background with animated progress dialog."""
-        if self._enhancements_worker is not None:
-            return  # already running
-
-        # Use enabled categories from settings if none specified
-        if categories is None:
-            categories = AppSettings.get_enabled_enhancement_categories()
-
-        status_bar = self._status_bar()
-        self._enhancements_worker = EnhancementsGeneratorWorker(categories=categories)
-        self.enhancements_tab.set_operation_running("Generating enhancements…")
-        status_bar.showMessage("Generating enhancements in background…")
-
-        # Show animated progress dialog
-        progress_dialog = AnimatedProgressDialog(
-            "Generating enhanced localizations from DataForge…\n\nThis may take a few minutes on the first run.",
-            parent=self,
-            title="Generating Enhancements",
-        )
-        self._enhancements_progress_dialog = progress_dialog
-
-        worker = self._enhancements_worker
-        worker.progress.connect(self.enhancements_tab.set_operation_progress)
-        worker.progress.connect(status_bar.showMessage)
-        worker.progress.connect(progress_dialog.setLabelText)
-        worker.progress_pct.connect(progress_dialog.set_progress)
-        worker.error.connect(self._on_enhancements_generation_error)
-        worker.finished.connect(self._on_enhancements_generation_finished)
-        worker.start()
-        self.start_spinner()
+        """Delegate to WorkerCoordinator.start_enhancements_generation."""
+        self.worker_coord.start_enhancements_generation(categories)
 
     def _on_enhancements_generation_error(self, message: str):
         logger.error(f"Enhancements generation error: {message}")
-        # Close progress dialog on error
-        if self._enhancements_progress_dialog is not None:
-            self._enhancements_progress_dialog.close()
-            self._enhancements_progress_dialog = None
 
     def _on_enhancements_generation_finished(self, success: bool):
-        self.stop_spinner()
-        # Close progress dialog
-        if self._enhancements_progress_dialog is not None:
-            self._enhancements_progress_dialog.close()
-            self._enhancements_progress_dialog = None
-
-        worker = self._enhancements_worker
-        if worker is not None:
-            worker.quit()
-            worker.wait()
-            self._enhancements_worker = None
         self.enhancements_tab.set_operation_idle()
         self.enhancements_tab.refresh_enhancements_status()
 
         status_bar = self._status_bar()
         if success:
             status_bar.showMessage("Enhancements generated — reloading entries…")
-            self._show_loading_progress("Reloading strings with updated enhancements…")
+            self.worker_coord.start_file_loading("Reloading strings with updated enhancements…")
         else:
             status_bar.showMessage("Enhancement generation failed — check the Log tab for details")
 
-    def _ensure_tools_downloaded(self) -> bool:
-        """Show the tool-download dialog if needed. Returns True when tools are ready."""
-        from src.gui.tool_download_dialog import ToolDownloadDialog
-        from src.utils.tools_manager import tools_are_present
-
-        if tools_are_present():
-            return True
-        dlg = ToolDownloadDialog(parent=self)
-        return bool(dlg.exec())
-
     def _run_dataforge_extraction(self):
-        """Launch DataForgeExtractWorker in the background (non-blocking)."""
-        if self._forge_worker is not None:
-            return
-
-        if not self._ensure_tools_downloaded():
-            return
-
-        p4k_path = AppSettings.get_p4k_path()
-        unp4k_exe = AppSettings.get_unp4k_exe_path()
-        unforge_exe = AppSettings.get_unforge_exe_path()
-        forge_dir = AppSettings.get_dataforge_cache_dir()
-
-        status_bar = self._status_bar()
-        self._forge_worker = DataForgeExtractWorker(p4k_path, unp4k_exe, unforge_exe, forge_dir)
-        self.enhancements_tab.set_operation_running("Extracting DataForge from Data.p4k…")
-        status_bar.showMessage("Extracting DataForge in background — this takes several minutes…")
-        self.start_spinner()
-
-        progress_dialog = AnimatedProgressDialog(
-            "Extracting DataForge from Data.p4k — this takes several minutes…",
-            parent=self,
-            title="DataForge Extraction",
-        )
-        self._forge_progress_dialog = progress_dialog
-
-        worker = self._forge_worker
-        worker.progress.connect(self.enhancements_tab.set_operation_progress)
-        worker.progress.connect(status_bar.showMessage)
-        worker.progress.connect(progress_dialog.setLabelText)
-        worker.progress_pct.connect(progress_dialog.set_progress)
-        worker.error.connect(self._on_dataforge_extract_error)
-        worker.finished.connect(self._on_dataforge_extract_finished)
-        worker.start()
-
-    def _on_dataforge_extract_error(self, message: str):
-        logger.error(f"DataForge extraction error: {message}")
+        """Delegate to WorkerCoordinator.start_dataforge_extraction."""
+        self.worker_coord.start_dataforge_extraction()
 
     def _on_dataforge_extract_finished(self, success: bool):
-        self.stop_spinner()
-        if self._forge_progress_dialog is not None:
-            self._forge_progress_dialog.close()
-            self._forge_progress_dialog = None
-        worker = self._forge_worker
-        if worker is not None:
-            worker.quit()
-            worker.wait()
-            self._forge_worker = None
         self.enhancements_tab.refresh_forge_status()
 
         status_bar = self._status_bar()
         if success:
             status_bar.showMessage("DataForge extracted — generating enhancements…")
-            self._run_enhancements_generation()
+            self.worker_coord.start_enhancements_generation()
         else:
             self.enhancements_tab.set_operation_idle()
             status_bar.showMessage("DataForge extraction failed — check the Log tab for details")
 
     def _run_p4k_extraction(self):
-        """Launch P4kExtractWorker with a progress dialog; reload sources on success."""
-        if self._p4k_worker is not None:
-            return
-
-        if not self._ensure_tools_downloaded():
-            return
-
-        p4k_path = AppSettings.get_p4k_path()
-        output_path = AppSettings.get_cache_dir() / "base.ini"
-        unp4k_exe = AppSettings.get_unp4k_exe_path()
-
-        self._p4k_worker = P4kExtractWorker(p4k_path, output_path, unp4k_exe)
-        self._p4k_progress = AnimatedProgressDialog(
-            "Extracting global.ini from Data.p4k...", parent=self, title="P4K Extraction"
-        )
-
-        self._p4k_worker.progress.connect(self._p4k_progress.setLabelText)
-        self._p4k_worker.progress_pct.connect(self._p4k_progress.set_progress)
-        self._p4k_worker.error.connect(lambda err: QMessageBox.warning(self, "Extraction Error", err))
-        self._p4k_worker.finished.connect(self._on_p4k_extract_finished)
-        self._p4k_worker.start()
-        self.start_spinner()
+        """Delegate to WorkerCoordinator.start_p4k_extraction."""
+        self.worker_coord.start_p4k_extraction()
 
     def _on_p4k_extract_finished(self, success: bool):
         """Handle P4K extraction completion."""
-        self.stop_spinner()
-        if self._p4k_progress is not None:
-            self._p4k_progress.close()
-        worker = self._p4k_worker
-        if worker is not None:
-            worker.quit()
-            worker.wait()
-            self._p4k_worker = None
-
         if success:
-            # Lock Global source to the local cache path with auto-update off,
-            # so future startups don't overwrite the extracted file from a remote URL.
             local_path = str(AppSettings.get_cache_dir() / "base.ini")
             AppSettings.set_source_path(AppSettings.SOURCE_GLOBAL, local_path)
             AppSettings.set_source_auto_update(AppSettings.SOURCE_GLOBAL, False)
-            # Refresh the config tab P4K status
             self.config_tab._refresh_p4k_status()
-
-            # Defer enhancements check until after file loading completes (avoid I/O contention)
             self._check_enhancements_after_loading = True
-
-            # Show progress dialog while reloading with extracted data
-            self._show_loading_progress("Reloading with extracted base.ini...")
+            self.worker_coord.start_file_loading("Reloading with extracted base.ini...")
 
     def closeEvent(self, event):
         """Save state and overrides before closing."""
         # Auto-save overrides if there are unsaved edits
-        if self.entries and not (self._loader_worker and self._loader_worker.isRunning()):
+        if self.entries and not self.worker_coord.is_file_loading():
             try:
                 from src.utils.user_ini_manager import save_user_ini, should_autosave_user_ini
 
@@ -2168,21 +1909,10 @@ class MainWindow(QMainWindow):
         # Cleanly shut down all background workers before the window is destroyed.
         # Without this, Qt may tear down the window mid-operation and leave threads
         # in an undefined state or DataForge temp files half-written.
-        _workers = (
-            self._loader_worker,
-            self._startup_sync_worker,
-            self._update_checker_worker,
-            self._p4k_worker,
-            self._enhancements_worker,
-            self._forge_worker,
-        )
-        for _w in _workers:
-            if _w is not None and _w.isRunning():
-                if hasattr(_w, "cancel"):
-                    _w.cancel()
-                _w.quit()
-                if not _w.wait(5000):  # 5 s — generous for DataForge, avoids deadlock
-                    logger.warning("Worker %s did not stop within 5 s on close", type(_w).__name__)
+        self.worker_coord.cleanup_all()
+        if self._update_checker_worker is not None and self._update_checker_worker.isRunning():
+            self._update_checker_worker.quit()
+            self._update_checker_worker.wait(5000)
 
         # Flush registry writes
         AppSettings.settings().sync()
