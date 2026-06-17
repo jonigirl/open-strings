@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-06-17
+
+### Fixed
+
+- Restoring a backup no longer crashes — the reload after restore now correctly
+  uses the async loading path instead of a stale direct API call
+- Startup freshness checks (DataForge, enhancements) no longer raise AttributeError
+  when a background worker is active — worker state is now read from the correct
+  coordinator object after the Phase 3 refactor
+
+### Changed
+
+- Internal architecture: extracted AppConstants, ApplyEngine, CategoryClassifier,
+  FileUtils, PreviewRenderer, StartupFlowManager, and ResourceUtils into dedicated
+  modules for maintainability
+- Test coverage floor raised to 83%
+- Build scripts now support signing with a trusted code-signing certificate
+  (`build_all.bat --sign`); self-signed builds automatically clean up after themselves
+
 ## [1.3.9] - 2026-05-20
 
 ### Added
