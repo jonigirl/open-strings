@@ -189,20 +189,17 @@ class MainWindow(QMainWindow):
         # Flag to defer enhancements checking until after file loading completes (avoid I/O contention)
         self._check_enhancements_after_loading = False
 
-        # Status bar state (composed message) - tracks sync status per source
-        self._source_status: dict[str, str] = {}  # source_name -> status_string
-
         # Progress dialogs
         self._startup_progress: AnimatedProgressDialog | None = None
         self._loading_progress: QProgressDialog | None = None
 
         self.help_dock: QDockWidget | None = None
         self._tutorial_tour: TutorialTour | None = None
-        self._channel_indicator: QLabel | None = None
-        self._app_version_indicator: QLabel | None = None
-        self._spinner_label: QLabel | None = None
-        self._spinner_frame: int = 0
-        self._spinner_timer: QTimer | None = None
+
+        # Status-bar manager (owns spinner, channel/version indicators, status text)
+        from src.gui.status_bar_manager import StatusBarManager  # noqa: PLC0415
+
+        self.status_bar_mgr = StatusBarManager(self)
 
         # Build UI
         from src.gui import window_setup as _ws  # noqa: PLC0415
@@ -229,12 +226,8 @@ class MainWindow(QMainWindow):
         logger.info("MainWindow initialized")
 
     def _status_bar(self) -> QStatusBar:
-        """Return the window status bar, creating it if needed."""
-        status_bar = self.statusBar()
-        if status_bar is None:
-            status_bar = QStatusBar(self)
-            self.setStatusBar(status_bar)
-        return status_bar
+        """Delegate to status_bar_mgr."""
+        return self.status_bar_mgr._status_bar()
 
     def setup_ui(self):
         """Build user interface."""
@@ -317,18 +310,10 @@ class MainWindow(QMainWindow):
         if self.help_dock is not None:
             self.help_dock.hide()
 
-        # App-version indicator sits immediately next to the SC-version
-        # text in the status bar message area. Added BEFORE the channel
-        # indicator so it lands leftmost in the permanent-widget zone
-        # (QStatusBar lays these out left-to-right in addition order, with
-        # the first-added sitting closest to the message text).
-        self._ensure_spinner()
-        self._ensure_app_version_indicator()
-
-        # Channel indicator on the right side of the status bar. Installed
-        # now so it's visible before any source loading kicks off — users
-        # who launch into an empty cache still see which channel they're on.
-        self._ensure_channel_indicator()
+        # Install the status-bar permanent widgets (spinner, app-version,
+        # channel indicator). Order matches the original: spinner first so
+        # it lands left-most in the permanent-widget zone.
+        self.status_bar_mgr.install_widgets()
 
     def _on_tab_changed(self, new_index: int):
         """Revert unapplied enhancement checkbox changes when leaving the Enhancements tab."""
@@ -1424,76 +1409,33 @@ class MainWindow(QMainWindow):
         )
         return any(w is not None and w.isRunning() for w in workers)
 
-    def _ensure_channel_indicator(self) -> None:
-        """Install a permanent right-side status-bar widget showing the active channel.
-
-        Lazily created on first call so it survives statusBar().showMessage()
-        churn (transient messages on the left don't displace permanent
-        widgets). The label's text is refreshed by :meth:`_refresh_channel_indicator`
-        whenever the channel changes.
-        """
-        if self._channel_indicator is not None:
-            return
-        self._channel_indicator = QLabel()
-        self._channel_indicator.setStyleSheet("font-size: 11px; font-weight: bold; padding: 2px 8px;")
-        self._status_bar().addPermanentWidget(self._channel_indicator)
-        self._refresh_channel_indicator()
+    def _ensure_spinner(self) -> None:
+        """Delegate to status_bar_mgr (called from legacy code paths)."""
+        self.status_bar_mgr._install_spinner()
 
     def _ensure_app_version_indicator(self) -> None:
-        """Install a permanent status-bar widget showing the app version."""
-        if self._app_version_indicator is not None:
-            return
-        self._app_version_indicator = QLabel(f"v{get_version()}")
-        self._app_version_indicator.setStyleSheet("font-size: 11px; padding: 2px 8px;")
-        self._status_bar().addPermanentWidget(self._app_version_indicator)
+        """Delegate to status_bar_mgr (called from legacy code paths)."""
+        self.status_bar_mgr._install_app_version_indicator()
 
-    _SPINNER_FRAMES = ("◐", "◓", "◑", "◒")
-    _SPINNER_COLORS = ("#5BCEFA", "#F5A9B8", "#5BCEFA", "#F5A9B8")
-
-    def _ensure_spinner(self) -> None:
-        """Install a hidden spinner label in the status bar. Shown during long operations."""
-        if self._spinner_label is not None:
-            return
-        self._spinner_label = QLabel()
-        self._spinner_label.setStyleSheet("font-size: 20px; padding: 0px 4px;")
-        self._spinner_label.setVisible(False)
-        self._status_bar().addPermanentWidget(self._spinner_label)
-        timer = QTimer(self)
-        timer.setInterval(200)
-        timer.timeout.connect(self._tick_spinner)
-        self._spinner_timer = timer
+    def _ensure_channel_indicator(self) -> None:
+        """Delegate to status_bar_mgr (called from legacy code paths)."""
+        self.status_bar_mgr._install_channel_indicator()
 
     def _tick_spinner(self) -> None:
-        if self._spinner_label is None:
-            return
-        self._spinner_frame = (self._spinner_frame + 1) % len(self._SPINNER_FRAMES)
-        color = self._SPINNER_COLORS[self._spinner_frame]
-        self._spinner_label.setStyleSheet(f"font-size: 20px; padding: 0px 4px; color: {color};")
-        self._spinner_label.setText(self._SPINNER_FRAMES[self._spinner_frame])
+        """Delegate to status_bar_mgr."""
+        self.status_bar_mgr._tick_spinner()
 
     def start_spinner(self) -> None:
-        """Show the status-bar activity spinner."""
-        if self._spinner_label is None:
-            return
-        self._spinner_frame = 0
-        self._spinner_label.setStyleSheet(f"font-size: 20px; padding: 0px 4px; color: {self._SPINNER_COLORS[0]};")
-        self._spinner_label.setText(self._SPINNER_FRAMES[0])
-        self._spinner_label.setVisible(True)
-        if self._spinner_timer is not None:
-            self._spinner_timer.start()
+        """Delegate to status_bar_mgr."""
+        self.status_bar_mgr.start_spinner()
 
     def stop_spinner(self) -> None:
-        """Hide the status-bar activity spinner."""
-        if self._spinner_timer is not None:
-            self._spinner_timer.stop()
-        if self._spinner_label is not None:
-            self._spinner_label.setVisible(False)
+        """Delegate to status_bar_mgr."""
+        self.status_bar_mgr.stop_spinner()
 
     def _refresh_channel_indicator(self) -> None:
-        """Update the status-bar channel label to reflect AppSettings.get_active_channel()."""
-        if self._channel_indicator is None:
-            return
-        self._channel_indicator.setText(f"Channel: {AppSettings.get_active_channel()}")
+        """Delegate to status_bar_mgr."""
+        self.status_bar_mgr.refresh_channel_indicator()
 
     def _sync_canonical_source_paths(self, context: str) -> None:
         """Mirror canonical file-backed source paths into QSettings."""
@@ -1592,63 +1534,19 @@ class MainWindow(QMainWindow):
         self.perform_merge_and_reload()
 
     def _update_status_bar(self):
-        """Compose sync status from all configured sources plus entry counts and game version.
-
-        Shows per-source sync status in hierarchy order, then entry count, override count, and game version.
-        Example: "Global: 4.7.0-LIVE ✓  |  Contracts: ✓  |  Ships: ✓  |  82,934 entries | 5 overrides | SC v4.7.176"
-        """
-        # Build status message from all configured sources in hierarchy order
-        hierarchy = AppSettings.get_merge_hierarchy()
-        parts = []
-
-        for source_name in hierarchy:
-            if source_name in self._source_status:
-                parts.append(self._source_status[source_name])
-
-        # Add entry and override counts if data is loaded
-        if self.entries:
-            modified_count = sum(1 for e in self.entries if e.status in ("Modified", "New"))
-            entry_info = f"{len(self.entries):,} entries"
-            if modified_count:
-                entry_info += f" | {modified_count} overrides"
-            parts.append(entry_info)
-
-        # Add game version + channel suffix. Reading build_manifest.id goes
-        # through get_game_install_path(), which is channel-aware post-0.9.3
-        # — so when the user switches channels this already re-reads from
-        # the new channel's manifest file. We tag the version with the
-        # channel name (e.g. "SC v4.7.176-PTU") so the status bar version
-        # is unambiguous even before the right-side channel indicator lands
-        # in the user's eye.
-        game_version = AppSettings.get_game_version()
-        active_channel = AppSettings.get_active_channel()
-        if game_version:
-            version_parts = game_version.split(".")
-            short_version = ".".join(version_parts[:3]) if len(version_parts) >= 3 else game_version
-            parts.append(f"SC v{short_version}-{active_channel}")
-        elif AppSettings.get_channel_install_path():
-            # Channel selected but no manifest (folder missing / not installed);
-            # surface the channel name so the user can see which one is active
-            # and why the version's blank.
-            parts.append(f"SC {active_channel} (manifest missing)")
-
-        status_bar = self._status_bar()
-        if parts:
-            status_bar.showMessage("  |  ".join(parts))
-        elif not self._has_long_running_worker():
-            # Don't overwrite a progress message with "Ready" while a worker
-            # is still running — the user reads the empty state as "done".
-            status_bar.showMessage("Ready")
+        """Delegate to status_bar_mgr."""
+        self.status_bar_mgr.update_status(
+            entries=self.entries,
+            has_running_worker=self._has_long_running_worker(),
+        )
 
     def _set_source_status(self, source_name: str, status: str) -> None:
-        """Set sync status for a specific source and update status bar.
-
-        Args:
-            source_name: Name of the source (e.g., "global", "contracts")
-            status: Status string to display (e.g., "Global: 4.7.0-LIVE ✓")
-        """
-        self._source_status[source_name] = status
-        self._update_status_bar()
+        """Delegate to status_bar_mgr."""
+        self.status_bar_mgr.set_source_status(source_name, status)
+        self.status_bar_mgr.update_status(
+            entries=self.entries,
+            has_running_worker=self._has_long_running_worker(),
+        )
 
     def _start_startup_sync(self):
         """Start async sync of all enabled remote sources, then load files when done.
@@ -2288,6 +2186,9 @@ class MainWindow(QMainWindow):
 
         # Flush registry writes
         AppSettings.settings().sync()
+
+        # Stop the status-bar spinner timer
+        self.status_bar_mgr.cleanup()
 
         # Save window state
         AppSettings.set_window_geometry(self.saveGeometry().data())
