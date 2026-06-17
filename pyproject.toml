@@ -86,7 +86,6 @@ omit = [
     "src/gui/import_dialog.py",
     "src/gui/log_tab.py",
     "src/gui/coach_mark.py",
-    "src/gui/markdown_renderer.py",
     "src/gui/filter_header.py",
     "src/gui/theme.py",
     "src/gui/workers.py",
