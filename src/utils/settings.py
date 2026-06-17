@@ -282,74 +282,24 @@ class AppSettings:
     SC_INSTALL_ROOT = "sc_install_root"
     ACTIVE_CHANNEL = "active_channel"
 
-    # Channel names are the folder names Star Citizen uses under its install
-    # root. Order here drives the combo box order in the Config tab.
-    CHANNEL_LIVE = "LIVE"
-    CHANNEL_PTU = "PTU"
-    CHANNEL_EPTU = "EPTU"
-    CHANNEL_HOTFIX = "HOTFIX"
-    CHANNEL_TECH_PREVIEW = "TECH-PREVIEW"
-    AVAILABLE_CHANNELS = (
-        CHANNEL_LIVE,
-        CHANNEL_PTU,
+    # Channel names, RSI default roots, and enhancement mappings are defined in
+    # app_constants.py and re-exported here so all callers using AppSettings.X work
+    # without change.  Code that only needs the data can import from app_constants
+    # directly.
+    from src.utils.app_constants import (
+        _RSI_DEFAULT_ROOTS,
+        AVAILABLE_CHANNELS,
         CHANNEL_EPTU,
         CHANNEL_HOTFIX,
+        CHANNEL_LIVE,
+        CHANNEL_PTU,
         CHANNEL_TECH_PREVIEW,
+        DEFAULT_CHANNEL,
+        DIFF_CATEGORY_TO_GENERATOR_KEYS,
+        ENHANCEMENT_CATEGORY_FILES,
+        ENHANCEMENT_LABELS,
+        ENHANCEMENTS_FILES,
     )
-    DEFAULT_CHANNEL = CHANNEL_LIVE
-
-    # Common RSI installation root candidates for auto-detection (no channel suffix).
-    # Used by ensure_default_settings(), get_sc_install_root(), and
-    # get_game_install_path() — single source of truth for these literals.
-    _RSI_DEFAULT_ROOTS = (
-        r"C:\Program Files\Roberts Space Industries\StarCitizen",
-        r"C:\Program Files (x86)\Roberts Space Industries\StarCitizen",
-    )
-
-    # Enhancements cache filenames (written by generate_enhancements_ini.py into cache dir)
-    ENHANCEMENTS_FILES = {
-        "ship_descs": "ships_desc_enhancements.ini",
-        "component_descs": "components_desc_enhancements.ini",
-        "ship_weapon_descs": "ship_weapons_desc_enhancements.ini",
-        "fps_weapon_descs": "fps_weapons_desc_enhancements.ini",
-        "mission_rewards": "mission_rewards_enhancements.ini",
-        "commodity_crafting": "commodity_crafting_enhancements.ini",
-        "journal": "journal_enhancements.ini",
-        "missile_enhancements": "missile_enhancements.ini",
-    }
-
-    # User-facing category labels — match the filter categories on the main page
-    ENHANCEMENT_LABELS = {
-        "ships": "Ships",
-        "ship_items": "Ship Items",
-        "gear": "Gear",
-        "missions": "Missions",
-        "commodities": "Commodities",
-        "journal": "Journal",
-    }
-
-    # Maps each checkbox key to the enhancement file keys it controls
-    ENHANCEMENT_CATEGORY_FILES = {
-        "ships": ["ship_descs"],
-        "ship_items": ["component_descs", "ship_weapon_descs", "missile_enhancements"],
-        "gear": ["fps_weapon_descs"],
-        "missions": ["mission_rewards"],
-        "commodities": ["commodity_crafting"],
-        "journal": ["journal"],
-    }
-
-    # Maps dataforge_diff.CATEGORY_SUBTREES keys to generate_enhancements_ini.py
-    # file keys (_want() / ENHANCEMENTS_FILES).  Used by EnhancementsGeneratorWorker
-    # to translate dirty_categories() output into the generator's internal vocabulary.
-    DIFF_CATEGORY_TO_GENERATOR_KEYS: dict[str, list[str]] = {
-        "ships": ["ship_descs"],
-        "components": ["component_descs"],
-        "ship_weapons": ["ship_weapon_descs", "missile_enhancements"],
-        "fps_weapons": ["fps_weapon_descs"],
-        "missions": ["mission_rewards"],
-        "commodities": ["commodity_crafting"],
-        "journal": ["journal"],
-    }
 
     # Settings keys - Legacy
     GAME_INSTALL_PATH = "game_install_path"

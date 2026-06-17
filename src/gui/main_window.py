@@ -5,7 +5,6 @@ import os
 import shutil
 import tempfile
 from collections import Counter
-from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtCore import QModelIndex, Qt, QTimer, QUrl, pyqtSlot
@@ -42,6 +41,7 @@ from src.gui.workers import (
 from src.merger.ini_merger import merge_sources_by_hierarchy
 from src.models.string_model import StringEntry
 from src.utils.applied_file_validator import validate_applied_file
+from src.utils.apply_engine import create_apply_backup, find_apply_base_file
 from src.utils.entry_filter import filter_entry_indices
 from src.utils.locpack_exporter import default_locpack_filename, write_locpack_zip
 from src.utils.perf import timed
@@ -305,30 +305,7 @@ class MainWindow(QMainWindow):
         try:
             target_path.parent.mkdir(parents=True, exist_ok=True)
 
-            backup_path = None  # Tracks the backup created this apply (used for restore on validation failure)
-
-            # Backup existing file if it exists
-            if target_path.exists():
-                backup_dir = AppSettings.get_backups_dir()
-
-                # Find all existing backups
-                backup_files = sorted(backup_dir.glob("global.ini.bak_*"), key=lambda f: f.stat().st_mtime)
-
-                # Create new backup first — so we never lose a backup slot if
-                # the copy fails (e.g. disk full).
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                backup_path = backup_dir / f"global.ini.bak_{timestamp}"
-                shutil.copy2(target_path, backup_path)
-                logger.info(f"Backed up existing file to {backup_path}")
-
-                # Prune oldest backup now that the new one is confirmed.
-                if len(backup_files) >= _MAX_BACKUPS:
-                    oldest_backup = backup_files[0]
-                    try:
-                        oldest_backup.unlink()
-                        logger.info(f"Deleted oldest backup: {oldest_backup.name}")
-                    except OSError as prune_err:
-                        logger.warning(f"Could not delete oldest backup {oldest_backup.name}: {prune_err}")
+            backup_path = create_apply_backup(target_path, AppSettings.get_backups_dir(), _MAX_BACKUPS)
 
             # Build final merged dict by re-merging all sources with user edits
             # This ensures Apply uses the latest source versions (catches any file
@@ -373,26 +350,8 @@ class MainWindow(QMainWindow):
             # version bumps; skipped if stock doesn't ship the key.
             merged_dict = _stamp_frontend_version(merged_dict)
 
-            # Get a base file to use for structure preservation
-            # Use the first source file from hierarchy
-            base_file = None
-            for source_name in hierarchy:
-                source_path = AppSettings.get_source_path(source_name)
-                # Check if it's a URL (remote source) - use cache
-                if source_path and (source_path.startswith("http://") or source_path.startswith("https://")):
-                    # Map source name to cache file
-                    cache_mapping = {
-                        AppSettings.SOURCE_GLOBAL: "base.ini",
-                    }
-                    if source_name in cache_mapping:
-                        cache_file = AppSettings.get_cache_dir() / cache_mapping[source_name]
-                        if cache_file.exists():
-                            base_file = cache_file
-                            break
-                # Otherwise check if it's a local file that exists
-                elif source_path and Path(source_path).exists():
-                    base_file = Path(source_path)
-                    break
+            source_paths = {name: AppSettings.get_source_path(name) for name in hierarchy}
+            base_file = find_apply_base_file(hierarchy, source_paths, AppSettings.get_cache_dir())
 
             if not base_file:
                 raise FileNotFoundError("No base file found. Configure sources and download them first.")
