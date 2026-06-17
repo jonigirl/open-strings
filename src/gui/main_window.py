@@ -12,7 +12,6 @@ from PyQt6.QtCore import QModelIndex, Qt, QTimer, QUrl, pyqtSlot
 from PyQt6.QtGui import QDesktopServices, QFont, QIcon
 from PyQt6.QtWidgets import (
     QApplication,
-    QCheckBox,
     QDockWidget,
     QFileDialog,
     QHBoxLayout,
@@ -78,9 +77,8 @@ class MainWindow(QMainWindow):
         self.default_values: dict[str, str] = {}  # Store default values from cached base source
 
         # Track whether we've prompted for enhancements on startup (prevents duplicate dialogs)
-        self._enhancements_prompted_on_startup = False
-        # Flag to defer enhancements checking until after file loading completes (avoid I/O contention)
-        self._check_enhancements_after_loading = False
+        # and whether file load should trigger an enhancements freshness check.
+        # Both flags now live on startup_flow_mgr; kept as properties for MainWindow callers.
 
         self.help_dock: QDockWidget | None = None
 
@@ -128,6 +126,11 @@ class MainWindow(QMainWindow):
 
         self.tutorial_mgr = TutorialManager(self)
         self.tutorial_mgr.tour_finished.connect(self._start_post_tutorial_tasks)
+
+        # Startup flow manager — P4K/DataForge/enhancements freshness decision tree
+        from src.gui.startup_flow_manager import StartupFlowManager  # noqa: PLC0415
+
+        self.startup_flow_mgr = StartupFlowManager(self, self.worker_coord, self.enhancements_tab)
 
         # Ensure cache directory exists
         AppSettings.get_cache_dir()
@@ -600,7 +603,7 @@ class MainWindow(QMainWindow):
                 # Shared helper — retries with backoff, clears read-only bits,
                 # and outlasts OneDrive/Defender/indexer locks that commonly
                 # reject the first attempt with WinError 5.
-                from src.utils.pak_extractor import robust_rmtree
+                from src.utils.file_utils import robust_rmtree
 
                 robust_rmtree(dataforge_dir)
                 deleted.append("dataforge/")
@@ -1168,7 +1171,7 @@ class MainWindow(QMainWindow):
         # freshly-extracted PTU where all enhancement INIs are missing,
         # the user sees enhancements regenerate with no confirmation.
         # Each channel deserves its own "which enhancements?" prompt.
-        self._enhancements_prompted_on_startup = False
+        self.startup_flow_mgr.reset_startup_state()
 
         # If the new channel has never been extracted, base.ini won't exist
         # and perform_merge_and_reload() would fail silently with an empty
@@ -1199,7 +1202,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "enhancements_tab"):
             self.enhancements_tab.refresh_enhancements_status()
 
-        self._enhancements_prompted_on_startup = False
+        self.startup_flow_mgr.reset_startup_state()
 
         if self._check_p4k_freshness():
             self._status_bar().showMessage(f"Data folder changed to {data_dir} — extracting Data.p4k…")
@@ -1246,231 +1249,24 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot()
     def _on_startup_sync_finished(self):
-        """Sync complete — check p4k freshness, then load sources."""
-        p4k_extraction_started = self._check_p4k_freshness()
-
-        if p4k_extraction_started:
-            return
-
-        self._maybe_prompt_dataforge_refresh()
-
-        self._check_enhancements_after_loading = True
-        self.worker_coord.start_file_loading()
+        """Sync complete — delegate to StartupFlowManager."""
+        self.startup_flow_mgr.on_startup_sync_finished()
 
     def _check_p4k_freshness(self) -> bool:
-        """Prompt to extract from Data.p4k if base.ini is missing or outdated.
-
-        Returns:
-            True if P4K extraction was started (caller should defer file loading).
-            False if no extraction is needed or user declined.
-        """
-        p4k_path = AppSettings.get_p4k_path()
-        base_ini = AppSettings.get_cache_dir() / "base.ini"
-
-        if not p4k_path.exists():
-            return False  # silently skip — game path not set
-
-        base_missing = not base_ini.exists()
-        p4k_newer = (not base_missing) and (p4k_path.stat().st_mtime > base_ini.stat().st_mtime)
-
-        if not base_missing and not p4k_newer:
-            return False  # cache is present and up to date
-
-        if base_missing:
-            msg = (
-                "No base localization file found in cache.\n\n"
-                "Extract global.ini from Data.p4k now?\n"
-                "(Required to load and display localization strings.)"
-            )
-        else:
-            msg = (
-                "Data.p4k is newer than your cached base.ini.\n\n"
-                "Extract global.ini from Data.p4k now?\n"
-                "(This gives you stock strings matching your exact installed game version.)"
-            )
-
-        reply = QMessageBox.question(
-            self,
-            "Extract from Data.p4k",
-            msg,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            self._run_p4k_extraction()
-            return True
-        return False
+        """Delegate to StartupFlowManager.check_p4k_freshness."""
+        return self.startup_flow_mgr.check_p4k_freshness()
 
     def _maybe_prompt_dataforge_refresh(self) -> None:
-        """Prompt to re-extract DataForge if its cache is stale vs. Data.p4k.
-
-        Called during startup after base.ini passes its freshness check.
-        A stale DataForge cache doesn't block the base-string workflow — the
-        table loads fine — but it means the next enhancements regeneration
-        will run against old entity data, so stats/missions/blueprints will
-        drift from what the current game build actually ships. Users who
-        notice the passive ``DataForge: cache outdated`` label on the
-        Enhancements tab want to act on it; surfacing a Yes/No dialog on
-        startup consolidates the prompt into the same flow as the base.ini
-        prompt above.
-
-        Silent no-op when the cache is fresh, when unp4k or Data.p4k is
-        missing (no signal to act on), when a DataForge or enhancements
-        worker is already running (don't stack prompts), or when the cache
-        has no stamp file yet (that's the "never extracted" case — the
-        existing ``_check_enhancements_freshness`` prompt handles it via a
-        category-selection dialog after the first load).
-
-        Does NOT defer file loading — unlike the base.ini case, loading
-        the table doesn't depend on DataForge. The extract runs in the
-        background and chains into enhancements generation on completion.
-        """
-        from src.utils.pak_extractor import dataforge_cache_is_fresh
-
-        if self.worker_coord.has_active_worker():
-            return
-        p4k_path = AppSettings.get_p4k_path()
-        if not p4k_path.exists():
-            return
-        forge_dir = AppSettings.get_dataforge_cache_dir()
-        if not (forge_dir / ".p4k_mtime").exists():
-            # Never extracted — handled later by _check_enhancements_freshness,
-            # which shows a richer category-selection dialog.
-            return
-        if dataforge_cache_is_fresh(p4k_path, forge_dir):
-            return
-
-        reply = QMessageBox.question(
-            self,
-            "DataForge Cache Outdated",
-            "Your DataForge entity cache is older than the current Data.p4k.\n\n"
-            "Re-extract DataForge and regenerate enhancements now?\n\n"
-            "This takes 5–10 minutes and runs in the background — you can keep "
-            "editing strings while it works. Skip for now if you'd rather not wait; "
-            "you can always trigger this from the Enhancements tab.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            self._run_dataforge_extraction()
+        """Delegate to StartupFlowManager.maybe_prompt_dataforge_refresh."""
+        self.startup_flow_mgr.maybe_prompt_dataforge_refresh()
 
     def _check_enhancements_freshness(self):
-        """If enabled enhancement files are missing, prompt to generate them.
-
-        Shows a category selection dialog on startup. If called again after P4K
-        extraction and we already prompted, runs generation with saved selections.
-        """
-        cache_dir = AppSettings.get_cache_dir()
-        if not (cache_dir / "base.ini").exists():
-            return
-        if self.worker_coord.has_active_worker():
-            return
-
-        # Only check enabled categories
-        enabled = AppSettings.get_enabled_enhancement_categories()
-        missing = [key for key in enabled if not (cache_dir / AppSettings.ENHANCEMENTS_FILES[key]).exists()]
-        if not missing:
-            return
-
-        p4k_path = AppSettings.get_p4k_path()
-        if not p4k_path.exists():
-            return
-
-        # If we already prompted and user chose to generate, just run with saved selections
-        if self._enhancements_prompted_on_startup:
-            self._run_enhancements_pipeline()
-            return
-
-        # Show category selection dialog
-        self._enhancements_prompted_on_startup = True
-        selected = self._show_enhancement_category_dialog(missing)
-        if selected:
-            self._run_enhancements_pipeline()
+        """Delegate to StartupFlowManager.check_enhancements_freshness."""
+        self.startup_flow_mgr.check_enhancements_freshness()
 
     def _show_enhancement_category_dialog(self, missing_keys: list[str]) -> set[str] | None:
-        """Show a dialog letting the user select which enhancement categories to generate.
-
-        Args:
-            missing_keys: List of category keys that are currently missing.
-
-        Returns:
-            Set of selected category keys, or None if user clicked Skip.
-        """
-        from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QVBoxLayout
-
-        # Collapse the missing-file list down to the set of category checkboxes
-        # the user will actually see. The dialog is category-shaped, not
-        # file-shaped — reporting the file count here confuses users because a
-        # single category (e.g. ship_items) maps to multiple files.
-        missing_file_keys = set(missing_keys)
-        missing_checkbox_keys = set()
-        for checkbox_key, file_keys in AppSettings.ENHANCEMENT_CATEGORY_FILES.items():
-            if any(fk in missing_file_keys for fk in file_keys):
-                missing_checkbox_keys.add(checkbox_key)
-
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Generate Enhancements")
-        dialog.setMinimumWidth(400)
-        layout = QVBoxLayout(dialog)
-
-        n = len(missing_checkbox_keys)
-        noun = "category is" if n == 1 else "categories are"
-        layout.addWidget(
-            QLabel(
-                f"{n} enhancement {noun} missing.\n"
-                "Select which to generate.\n"
-                "You can change this later in the Enhancements tab."
-            )
-        )
-
-        layout.addSpacing(8)
-
-        checkboxes: dict[str, QCheckBox] = {}
-        for key, label in AppSettings.ENHANCEMENT_LABELS.items():
-            cb = QCheckBox(label)
-            if key in missing_checkbox_keys:
-                cb.setChecked(True)
-                cb.setText(f"{label}  (missing)")
-            else:
-                cb.setChecked(False)
-            checkboxes[key] = cb
-            layout.addWidget(cb)
-
-        layout.addSpacing(8)
-
-        info = QLabel(
-            "DataForge data will be extracted automatically if not already cached.\nFirst run takes ~5-10 minutes."
-        )
-        info.setProperty("role", "secondary")
-        info.setStyleSheet("font-size: 11px;")
-        info.setWordWrap(True)
-        layout.addWidget(info)
-
-        layout.addSpacing(8)
-
-        button_row = QHBoxLayout()
-        generate_btn = QPushButton("Generate")
-        generate_btn.setDefault(True)
-        skip_btn = QPushButton("Skip")
-
-        generate_btn.clicked.connect(dialog.accept)
-        skip_btn.clicked.connect(dialog.reject)
-
-        button_row.addStretch()
-        button_row.addWidget(skip_btn)
-        button_row.addWidget(generate_btn)
-        layout.addLayout(button_row)
-
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            # Only save state for categories that were missing — don't touch
-            # the persisted state of categories that already have their files
-            for key, cb in checkboxes.items():
-                if key in missing_checkbox_keys:
-                    AppSettings.set_enhancement_category_enabled(key, cb.isChecked())
-            # Refresh enhancements tab checkboxes to match
-            self.enhancements_tab.revert_category_checkboxes()
-            self.enhancements_tab.refresh_enhancements_status()
-            return AppSettings.get_enabled_enhancement_categories()
-
-        return None
+        """Delegate to StartupFlowManager._show_enhancement_category_dialog."""
+        return self.startup_flow_mgr._show_enhancement_category_dialog(missing_keys)
 
     def _show_loading_progress(self, message: str = "Loading localization strings...") -> None:
         """Delegate to WorkerCoordinator.start_file_loading."""
@@ -1513,9 +1309,9 @@ class MainWindow(QMainWindow):
 
         # If enhancements check was deferred during startup, do it now (after file loading completes)
         # This avoids concurrent I/O contention between file loader and enhancements generator
-        if self._check_enhancements_after_loading:
-            self._check_enhancements_after_loading = False
-            self._check_enhancements_freshness()
+        if self.startup_flow_mgr.check_enhancements_after_loading:
+            self.startup_flow_mgr.check_enhancements_after_loading = False
+            self.startup_flow_mgr.check_enhancements_freshness()
 
     @pyqtSlot(str)
     def _on_loading_error(self, error_msg: str):
@@ -1576,7 +1372,7 @@ class MainWindow(QMainWindow):
             AppSettings.set_source_path(AppSettings.SOURCE_GLOBAL, local_path)
             AppSettings.set_source_auto_update(AppSettings.SOURCE_GLOBAL, False)
             self.config_tab._refresh_p4k_status()
-            self._check_enhancements_after_loading = True
+            self.startup_flow_mgr.check_enhancements_after_loading = True
             self.worker_coord.start_file_loading("Reloading with extracted base.ini...")
 
     def closeEvent(self, event):

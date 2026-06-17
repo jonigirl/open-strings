@@ -217,11 +217,14 @@ class TestLoadSourceFiles:
         shared = next(e for e in entries if e.key == "shared_key")
         assert shared.original_value == "contracts_value"
 
-    def test_legacy_custom_path_param(self, tmp_path):
+    def test_legacy_custom_path_replaced_by_user_overrides(self, tmp_path):
         override_file = tmp_path / "user.ini"
         override_file.write_text("vehicle_NameHawk=Legacy Override\n", encoding="utf-8")
+        from src.parser.ini_parser import parse_ini_file
+
         sources = self._make_sources()
-        entries = load_source_files(sources, ["global"], custom_path=override_file)
+        overrides = parse_ini_file(override_file)
+        entries = load_source_files(sources, ["global"], user_overrides=overrides)
         hawk = next(e for e in entries if e.key == "vehicle_NameHawk")
         assert hawk.custom_value == "Legacy Override"
 
@@ -302,6 +305,14 @@ def _mock_settings(
     settings.ENHANCEMENTS_FILES = {
         "ship_descs": "ships_desc_enhancements.ini",
         "mission_rewards": "mission_rewards_enhancements.ini",
+    }
+    settings.ENHANCEMENT_CATEGORY_FILES = {
+        "ships": ["ship_descs"],
+        "missions": ["mission_rewards"],
+    }
+    settings.ENHANCEMENT_LABELS = {
+        "ships": "Ships",
+        "missions": "Missions",
     }
     settings.get_merge_hierarchy.return_value = hierarchy or ["global", "user"]
     settings.get_cache_dir.return_value = cache_dir or Path("/fake/cache")

@@ -14,19 +14,16 @@ from src.utils.perf import timed
 
 logger = logging.getLogger(__name__)
 
-# Maps enhancements file labels to the display category for their keys.
-# Used by load_sources_from_settings to tag enhancement entries with their
-# proper category so the UI can filter them independently.
-_ENHANCEMENTS_LABEL_CATEGORY: dict[str, str] = {
-    "ship_descs": "Ships",
-    "component_descs": "Ship Items",
-    "ship_weapon_descs": "Ship Items",
-    "fps_weapon_descs": "Gear",
-    "mission_rewards": "Missions",
-    "commodity_crafting": "Commodities",
-    "journal": "Journal",
-    "missile_enhancements": "Ship Items",
-}
+
+def _build_enhancements_label_category() -> dict[str, str]:
+    from src.utils.settings import AppSettings
+
+    result: dict[str, str] = {}
+    for category_key, file_labels in AppSettings.ENHANCEMENT_CATEGORY_FILES.items():
+        display_label = AppSettings.ENHANCEMENT_LABELS.get(category_key, category_key)
+        for label in file_labels:
+            result[label] = display_label
+    return result
 
 
 @timed
@@ -34,7 +31,6 @@ def load_source_files(
     sources_dict: dict[str, dict[str, str]],
     hierarchy: list[str],
     user_overrides: dict[str, str] | None = None,
-    custom_path: str | Path | None = None,
     enhancements_key_categories: dict[str, str] | None = None,
 ) -> list[StringEntry]:
     """Load source files and build StringEntry list using hierarchy merge.
@@ -50,7 +46,6 @@ def load_source_files(
                   e.g., ["global", "contracts", "components"]
         user_overrides: Optional dict of pre-existing user edits to apply with highest priority.
                        Applied after all sources are merged.
-        custom_path: DEPRECATED. Kept for backward compatibility. Use user_overrides instead.
 
     Returns:
         List of StringEntry objects with merged baseline values and user edits applied.
@@ -59,11 +54,6 @@ def load_source_files(
     from src.utils.settings import AppSettings
 
     entries = []
-
-    # Handle legacy custom_path parameter
-    if custom_path and not user_overrides:
-        logger.debug(f"Loading user overrides from legacy path: {custom_path}")
-        user_overrides = parse_ini_file(custom_path)
 
     logger.debug(
         f"Starting merge of {sum(len(d) for d in sources_dict.values())} total keys from {len(sources_dict)} sources"
@@ -260,6 +250,7 @@ def load_sources_from_settings() -> tuple[dict[str, dict[str, str]], list[str], 
     enhancements_key_categories: dict[str, str] = {}
     enabled_categories = AppSettings.get_enabled_enhancement_categories()
     if enabled_categories:
+        enhancements_label_category = _build_enhancements_label_category()
         enhancements_combined: dict[str, str] = {}
         for label, filename in AppSettings.ENHANCEMENTS_FILES.items():
             if label not in enabled_categories:
@@ -267,7 +258,7 @@ def load_sources_from_settings() -> tuple[dict[str, dict[str, str]], list[str], 
             enhancements_file = cache_dir / filename
             if enhancements_file.exists():
                 data = parse_ini_file(enhancements_file)
-                category = _ENHANCEMENTS_LABEL_CATEGORY.get(label)
+                category = enhancements_label_category.get(label)
                 if category:
                     for key in data:
                         enhancements_key_categories[key] = category

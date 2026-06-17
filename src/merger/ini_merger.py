@@ -7,7 +7,7 @@ from collections import defaultdict
 from functools import cache
 from pathlib import Path
 
-from src.models.string_model import _COMPONENT_CODES
+from src.utils.category_classifier import _COMPONENT_CODES
 from src.utils.perf import timed
 
 logger = logging.getLogger(__name__)
