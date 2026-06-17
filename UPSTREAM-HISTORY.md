@@ -343,5 +343,5 @@
 - [x] DataForge cache relocated to `%LOCALAPPDATA%\Open Strings\<channel>\cache\dataforge` (outside OneDrive scope) with one-shot startup migration **[ported]**
 - [x] `dataforge_patcher.py` switched from `xml.etree.ElementTree` to `lxml.etree` **[ported]**
 - [x] Python 3.12 `shutil.rmtree` onexc keyword-arg compat fix (`_RMTREE_CB_KWARG`) **[ported]**
-- [ ] Retired URL sources pruner — held; prereqs absent from this fork, revisit post-1.3.0 release
+- [ ] Retired URL sources pruner — not applicable; Smart Citizen's multi-source URL infrastructure does not exist in Open Strings (only local global/user sources)
 - [ ] Bundle updated unp4k binaries — not applicable; Open Strings downloads tools at runtime
