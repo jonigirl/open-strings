@@ -2,7 +2,6 @@
 
 import importlib.util
 import logging
-import os
 import sys
 from pathlib import Path
 
@@ -11,24 +10,10 @@ from PyQt6.QtGui import QColor, QMouseEvent
 from PyQt6.QtWidgets import QLabel, QProgressBar, QProgressDialog, QStyledItemDelegate, QStyleOptionViewItem, QWidget
 
 from src.utils.dataforge_diff import dirty_categories
+from src.utils.resource import _resolve_patches_dir
 from src.utils.settings import AppSettings
 
 logger = logging.getLogger(__name__)
-
-
-def get_resource_path(relative_path: str) -> str:
-    """Get absolute path to resource, works for dev and for PyInstaller."""
-    base_path = getattr(sys, "_MEIPASS", None)
-    if base_path is None:
-        # If not running as PyInstaller bundle, use the project root
-        base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-    return os.path.join(base_path, relative_path)
-
-
-def _resolve_patches_dir() -> Path:
-    """Return the path to the bundled DataForge patches directory."""
-    return Path(get_resource_path("patches"))
 
 
 class AnimatedProgressDialog(QProgressDialog):

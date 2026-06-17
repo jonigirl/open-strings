@@ -35,7 +35,8 @@ from src.gui.theme import (
     get_tagline_color,
     get_title_color,
 )
-from src.gui.workers import SelectAllDelegate, get_resource_path
+from src.gui.workers import SelectAllDelegate
+from src.utils.resource import get_resource_path
 from src.utils.version import get_version
 
 if TYPE_CHECKING:

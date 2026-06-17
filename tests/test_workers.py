@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from src.gui.workers import _resolve_patches_dir, get_resource_path
+from src.utils.resource import _resolve_patches_dir, get_resource_path
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Pure-function helpers (no Qt required)

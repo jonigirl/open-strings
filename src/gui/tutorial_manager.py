@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal, pyqtSlot
 
 from src.gui.coach_mark import CoachMarkStep, TutorialTour
-from src.gui.workers import get_resource_path
+from src.utils.resource import get_resource_path
 from src.utils.settings import AppSettings
 from src.utils.version import get_version
 

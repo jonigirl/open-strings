@@ -2,9 +2,18 @@
 
 import pytest
 from src.models.string_model import StringEntry
-from src.utils.entry_filter import filter_entry_indices
+from src.utils.entry_filter import _NUM_FILTER_COLUMNS, filter_entry_indices
 
 pytestmark = pytest.mark.unit
+
+
+def test_num_filter_columns_matches_model():
+    from src.gui.string_table_model import NUM_COLUMNS
+
+    assert _NUM_FILTER_COLUMNS == NUM_COLUMNS, (
+        f"entry_filter._NUM_FILTER_COLUMNS ({_NUM_FILTER_COLUMNS}) is out of sync with "
+        f"string_table_model.NUM_COLUMNS ({NUM_COLUMNS}); update entry_filter.py"
+    )
 
 
 def _e(key="k", category="Ships", original_value="val", custom_value="", status="Unmodified"):

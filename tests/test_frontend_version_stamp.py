@@ -3,7 +3,7 @@
 from unittest.mock import patch
 
 import pytest
-from src.gui.main_window import (
+from src.utils.preview_renderer import (
     _FRONTEND_VERSION_KEY,
     _FRONTEND_VERSION_STAMP_RE,
     _stamp_frontend_version,
@@ -12,7 +12,7 @@ from src.gui.main_window import (
 
 @pytest.fixture
 def mock_version():
-    with patch("src.gui.main_window.get_version", return_value="1.3.1"):
+    with patch("src.utils.preview_renderer.get_version", return_value="1.3.1"):
         yield "1.3.1"
 
 
@@ -40,7 +40,7 @@ class TestFrontendVersionStamp:
         merged = {
             _FRONTEND_VERSION_KEY: ("Star Citizen Alpha 4.8.0 PTU | Localizations Enhanced with Open Strings v1.3.0")
         }
-        with patch("src.gui.main_window.get_version", return_value="1.3.1"):
+        with patch("src.utils.preview_renderer.get_version", return_value="1.3.1"):
             _stamp_frontend_version(merged)
         assert merged[_FRONTEND_VERSION_KEY] == (
             "Star Citizen Alpha 4.8.0 PTU | Localizations Enhanced with Open Strings v1.3.1"

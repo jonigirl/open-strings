@@ -108,6 +108,21 @@ def mock_p4k_path(temp_dir):
     return p4k_path
 
 
+@pytest.fixture
+def isolated_settings(tmp_path, monkeypatch):
+    """Redirect AppSettings to a fresh store in tmp_path.
+
+    Prevents settings-touching tests from writing to the developer's real
+    %APPDATA% settings.json. Tests that call AppSettings.set_*() or
+    AppSettings.settings() get an isolated store for the duration of the test.
+    """
+    from src.utils.settings import AppSettings
+
+    settings_file = tmp_path / "settings.json"
+    monkeypatch.setattr(AppSettings, "_get_settings_path", staticmethod(lambda: settings_file))
+    return settings_file
+
+
 def pytest_configure(config):
     """Configure pytest with custom markers"""
     import warnings
