@@ -1070,24 +1070,9 @@ class MainWindow(QMainWindow):
             # Restore the backup
             shutil.copy2(str(backup_file_path), str(target_path))
 
-            # Reload the file with overrides
-            overrides_path = AppSettings.get_user_ini_path()
-            overrides_arg = str(overrides_path) if overrides_path.exists() else None
-            self.entries = load_source_files(str(target_path), overrides_arg)
-            self.load_default_values()
-            self.update_category_combo()
-            self._model.set_data_source(
-                self.entries,
-                self.default_values,
-                AppSettings.get_favorite_prefix(),
-            )
-            self.apply_filters()
-
-            # Update status bar with entry counts and per-source status
-            self._update_status_bar()
-
             logger.info(f"Restored backup from {backup_file} to {target_path}")
             QMessageBox.information(self, "Success", f"Backup restored from:\n{backup_file_path.name}")
+            self._show_loading_progress("Reloading restored backup...")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to restore backup: {e}")
             logger.error(f"Error restoring backup: {e}")
@@ -1417,7 +1402,7 @@ class MainWindow(QMainWindow):
         """
         from src.utils.pak_extractor import dataforge_cache_is_fresh
 
-        if self._forge_worker is not None or self._enhancements_worker is not None:
+        if self.worker_coord.has_active_worker():
             return
         p4k_path = AppSettings.get_p4k_path()
         if not p4k_path.exists():
@@ -1452,7 +1437,7 @@ class MainWindow(QMainWindow):
         cache_dir = AppSettings.get_cache_dir()
         if not (cache_dir / "base.ini").exists():
             return
-        if self._enhancements_worker is not None or self._forge_worker is not None:
+        if self.worker_coord.has_active_worker():
             return
 
         # Only check enabled categories
