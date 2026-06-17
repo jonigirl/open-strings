@@ -51,6 +51,10 @@ def find_signtool() -> str | None:
 _SELF_SIGN_SUBJECT = "CN=Open Strings (Self-Signed Build)"
 _SELF_SIGN_STORE = "Cert:\\CurrentUser\\My"
 
+# Real Certum Open Source cert (USB token).  Must match the CN on your cert.
+_REAL_SIGN_SUBJECT = "Open Source Developer Joni Hayes"
+_REAL_SIGN_TSA = "http://timestamp.certum.pl"
+
 
 def create_self_signed_cert() -> tuple[str, None]:
     """Create a code-signing cert in the current user's cert store via PowerShell.
@@ -96,8 +100,48 @@ def create_self_signed_cert() -> tuple[str, None]:
     return thumb, None
 
 
+def run_real_sign(file_path: str) -> None:
+    """Sign *file_path* with the Certum USB token cert (must be plugged in).
+
+    Uses RFC 3161 timestamping so signatures stay valid after cert expiry.
+    Exits with code 1 on failure.
+    """
+    signtool = find_signtool()
+    if not signtool:
+        print(
+            "ERROR: signtool.exe not found.\n"
+            "  Install the Windows 10/11 SDK, add signtool to PATH, or set SIGNTOOL_PATH."
+        )
+        sys.exit(1)
+    cmd = [
+        signtool,
+        "sign",
+        "/n",
+        _REAL_SIGN_SUBJECT,
+        "/fd",
+        "SHA256",
+        "/tr",
+        _REAL_SIGN_TSA,
+        "/td",
+        "SHA256",
+        "/d",
+        "Open Strings",
+        file_path,
+    ]
+    print(f"  Signing (Certum): {os.path.basename(file_path)}")
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode != 0:
+            detail = (res.stdout + res.stderr).strip()
+            raise RuntimeError(f"signtool failed:\n{detail}")
+        print("  - Signed OK")
+    except (OSError, RuntimeError) as exc:
+        print(f"ERROR: {exc}")
+        sys.exit(1)
+
+
 def run_self_sign(file_path: str) -> None:
-    """Create a self-signed cert and sign *file_path*; exits with code 1 on failure."""
+    """Create a self-signed cert, sign *file_path*, then remove the cert; exits with code 1 on failure."""
     signtool = find_signtool()
     if not signtool:
         print(
@@ -128,6 +172,28 @@ def run_self_sign(file_path: str) -> None:
     except (OSError, RuntimeError) as exc:
         print(f"ERROR: {exc}")
         sys.exit(1)
+    finally:
+        cleanup_self_signed_certs()
+
+
+def cleanup_self_signed_certs() -> None:
+    """Remove all self-signed build certs matching _SELF_SIGN_SUBJECT from the user store."""
+    ps_cmd = (
+        "$store = [System.Security.Cryptography.X509Certificates.X509Store]::new('My', 'CurrentUser'); "
+        "$store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite); "
+        f"$certs = @($store.Certificates | Where-Object {{ $_.Subject -eq '{_SELF_SIGN_SUBJECT}' }}); "
+        "foreach ($c in $certs) { $store.Remove($c) }; "
+        "$store.Close()"
+    )
+    result = subprocess.run(
+        ["pwsh", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"  WARNING: cert cleanup failed: {(result.stdout + result.stderr).strip()}")
+    else:
+        print("  - Self-signed cert(s) removed from store")
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +207,41 @@ parser.add_argument(
     default=True,
     help="Build and self-sign with a new temporary self-signed cert (default).",
 )
+parser.add_argument(
+    "--sign",
+    action="store_true",
+    default=False,
+    help="Sign with the Certum USB token cert instead of a self-signed cert. Token must be plugged in.",
+)
+parser.add_argument(
+    "--sign-file",
+    metavar="PATH",
+    default=None,
+    help="Sign an already-built file with the Certum cert and exit (used for installer signing).",
+)
+parser.add_argument(
+    "--cleanup-certs",
+    action="store_true",
+    default=False,
+    help="Remove all stale self-signed build certs from the user store and exit.",
+)
 args = parser.parse_args()
+
+# --cleanup-certs: purge stale self-signed certs and exit.
+if args.cleanup_certs:
+    print("Removing stale self-signed build certs...")
+    cleanup_self_signed_certs()
+    sys.exit(0)
+
+# --sign-file: sign a file that was built separately (e.g. the Inno Setup installer) and exit.
+if args.sign_file:
+    print(f"\nSigning: {args.sign_file}")
+    if not os.path.isfile(args.sign_file):
+        print(f"ERROR: file not found: {args.sign_file}")
+        sys.exit(1)
+    run_real_sign(args.sign_file)
+    print()
+    sys.exit(0)
 
 # ---------------------------------------------------------------------------
 # Project paths
@@ -202,6 +302,10 @@ except Exception as e:
 exe_path = os.path.join(root_dir, "dist", "OpenStrings", "OpenStrings.exe")
 if not os.path.isfile(exe_path):
     print(f"WARNING: built exe not found at expected path: {exe_path}")
+elif args.sign:
+    print("Signing executable (Certum)...")
+    run_real_sign(exe_path)
+    print()
 else:
     print("Self-signing executable...")
     run_self_sign(exe_path)

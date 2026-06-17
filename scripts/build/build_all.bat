@@ -14,8 +14,13 @@ if exist dist  rmdir /s /q dist
 echo   - Old builds removed
 echo.
 
-echo Step 2: Building executable (self-signed)...
-uv run python scripts\build\build_exe.py --self-sign
+echo Step 2: Building executable...
+if /I "%1"=="--sign" (
+    echo   Using Certum USB token - ensure token is plugged in.
+    uv run python scripts\build\build_exe.py --sign
+) else (
+    uv run python scripts\build\build_exe.py --self-sign
+)
 if errorlevel 1 (
     echo ERROR: Failed to build executable
     pause
@@ -51,6 +56,13 @@ if "%ISCC%"=="" (
         echo You can create it manually with Inno Setup
     ) else (
         echo   - Installer created successfully!
+        if /I "%1"=="--sign" (
+            echo.
+            echo Step 4b: Signing installer...
+            for %%f in (dist\OpenStrings-*-Setup.exe) do (
+                uv run python scripts\build\build_exe.py --sign-file "%%f"
+            )
+        )
     )
 )
 echo.
