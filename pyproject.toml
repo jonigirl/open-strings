@@ -80,6 +80,7 @@ markers = [
 source = ["src"]
 omit = [
     "src/gui/main_window.py",
+    "src/gui/window_setup.py",
     "src/gui/config_tab.py",
     "src/gui/enhancements_tab.py",
     "src/gui/import_dialog.py",

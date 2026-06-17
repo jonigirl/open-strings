@@ -15,14 +15,11 @@ from pathlib import Path
 from PyQt6.QtCore import QModelIndex, Qt, QTimer, QUrl, pyqtSlot
 from PyQt6.QtGui import QDesktopServices, QFont, QIcon
 from PyQt6.QtWidgets import (
-    QAbstractItemView,
     QApplication,
     QCheckBox,
-    QComboBox,
     QDockWidget,
     QFileDialog,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QMainWindow,
     QMenu,
@@ -31,7 +28,6 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QStatusBar,
-    QTableView,
     QTabWidget,
     QTextBrowser,
     QVBoxLayout,
@@ -41,14 +37,12 @@ from PyQt6.QtWidgets import (
 from src.gui.coach_mark import CoachMarkStep, TutorialTour
 from src.gui.config_tab import ConfigTab
 from src.gui.enhancements_tab import EnhancementsTab
-from src.gui.filter_header import FilterHeaderView
 from src.gui.log_tab import LogTab
 from src.gui.string_table_model import (
     COL_CUSTOM,
     COL_STAR,
-    StringTableModel,
 )
-from src.gui.theme import BRAND_FONT_FAMILY, get_button_color, get_button_text_color, get_tagline_color, get_title_color
+from src.gui.theme import BRAND_FONT_FAMILY, get_button_color, get_button_text_color
 from src.gui.workers import (
     AnimatedProgressDialog,
     AppUpdateCheckerWorker,
@@ -56,7 +50,6 @@ from src.gui.workers import (
     EnhancementsGeneratorWorker,
     FileLoaderWorker,
     P4kExtractWorker,
-    SelectAllDelegate,
     StartupSyncWorker,
     get_resource_path,
 )
@@ -212,6 +205,9 @@ class MainWindow(QMainWindow):
         self._spinner_timer: QTimer | None = None
 
         # Build UI
+        from src.gui import window_setup as _ws  # noqa: PLC0415
+
+        self._ws = _ws
         self.setup_ui()
         self.restore_window_state()
 
@@ -259,14 +255,8 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.tagline_label)
         self._apply_branding_styles()
 
-        # Toolbar on the left; rendered-preview pane on the right. The
-        # preview renders the currently-selected row's effective value
-        # (custom override if present, else the merged baseline) with the
-        # game's EM3/EM4/~mission(...) tokens translated into styled HTML
-        # so mission and journal blocks read like in-game text instead of
-        # wall-of-tag. Stays wired across all tabs — it just reflects the
-        # last row you selected in the String Editor.
-        toolbar_layout = self.create_toolbar()
+        # Toolbar on the left; rendered-preview pane on the right.
+        toolbar_layout = self._ws.create_toolbar(self)
 
         self.preview_pane = QTextBrowser()
         self.preview_pane.setReadOnly(True)
@@ -289,7 +279,7 @@ class MainWindow(QMainWindow):
 
         # Tabs
         self.tabs = QTabWidget()
-        self._strings_tab_index = self.tabs.addTab(self.create_strings_tab(), "String Editor")
+        self._strings_tab_index = self.tabs.addTab(self._ws.create_strings_tab(self), "String Editor")
 
         # Config tab
         self.config_tab = ConfigTab()
@@ -309,7 +299,7 @@ class MainWindow(QMainWindow):
         self.log_tab = LogTab()
         self.tabs.addTab(self.log_tab, "Log")
 
-        self.tabs.addTab(self.create_about_tab(), "About")
+        self.tabs.addTab(self._ws.create_about_tab(self), "About")
 
         # Revert unapplied enhancement checkbox changes when leaving the tab
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -347,271 +337,20 @@ class MainWindow(QMainWindow):
         self._previous_tab_index = new_index
 
     def create_toolbar(self) -> QVBoxLayout:
-        """Create toolbar with buttons."""
-        layout = QVBoxLayout()
-
-        # Button row
-        button_layout = QHBoxLayout()
-
-        # Blue group — read / navigate
-        self.open_loc_dir_btn = QPushButton("Open Localization Dir")
-        self.open_loc_dir_btn.setStyleSheet(
-            f"background-color: {get_button_color('open')}; color: {get_button_text_color()}; font-weight: bold; padding: 6px;"
-        )
-        self.open_loc_dir_btn.setToolTip("Open the game's localization directory in Windows Explorer")
-        self.open_loc_dir_btn.clicked.connect(self.open_localization_dir)
-        button_layout.addWidget(self.open_loc_dir_btn)
-
-        # Green — commit
-        self.apply_btn = QPushButton("Apply to Game")
-        self.apply_btn.setStyleSheet(
-            f"background-color: {get_button_color('apply')}; color: {get_button_text_color()}; font-weight: bold; padding: 6px;"
-        )
-        self.apply_btn.setToolTip(
-            "Write the merged table contents to the game's global.ini. A timestamped backup of the current global.ini is created first."
-        )
-        self.apply_btn.clicked.connect(self.apply_to_game)
-        button_layout.addWidget(self.apply_btn)
-
-        # Red-orange — rollback
-        self.restore_backup_btn = QPushButton("Restore Backup")
-        self.restore_backup_btn.setStyleSheet(
-            f"background-color: {get_button_color('restore')}; color: {get_button_text_color()}; font-weight: bold; padding: 6px;"
-        )
-        self.restore_backup_btn.setToolTip(
-            "Restore a previous global.ini from Documents\\Open Strings\\backups\\. Up to 5 timestamped backups are kept; the oldest is pruned when a new one is created."
-        )
-        self.restore_backup_btn.clicked.connect(self.restore_backup)
-        button_layout.addWidget(self.restore_backup_btn)
-
-        # Gray group — cleanup
-        self.clear_loc_btn = QPushButton("Clear Localization")
-        self.clear_loc_btn.setStyleSheet(
-            f"background-color: {get_button_color('clear')}; color: {get_button_text_color()}; font-weight: bold; padding: 6px;"
-        )
-        self.clear_loc_btn.setToolTip(
-            "Delete the applied global.ini from the game's localization directory, reverting to vanilla game text"
-        )
-        self.clear_loc_btn.clicked.connect(self.clear_localization)
-        button_layout.addWidget(self.clear_loc_btn)
-
-        self.clear_cache_btn = QPushButton("Clear Cache")
-        self.clear_cache_btn.setStyleSheet(
-            f"background-color: {get_button_color('clear')}; color: {get_button_text_color()}; font-weight: bold; padding: 6px;"
-        )
-        self.clear_cache_btn.setToolTip(
-            "Delete all cached source files (base.ini, contracts.ini, etc.) from the local cache directory"
-        )
-        self.clear_cache_btn.clicked.connect(self.clear_cache)
-        button_layout.addWidget(self.clear_cache_btn)
-
-        # Export — packages the currently-applied global.ini into a zip for
-        # sharing (org-wide loc-packs, Discord drops, etc.). Uses the 'open'
-        # info-action role since it produces output without touching game state.
-        self.export_locpack_btn = QPushButton("Export")
-        self.export_locpack_btn.setStyleSheet(
-            f"background-color: {get_button_color('open')}; color: {get_button_text_color()}; font-weight: bold; padding: 6px;"
-        )
-        self.export_locpack_btn.setToolTip(
-            "Package the currently-applied global.ini into a zip for sharing. "
-            "Click Apply to Game first if you haven't already — Export reads the "
-            "applied file, not the in-memory edits."
-        )
-        self.export_locpack_btn.clicked.connect(self.export_locpack)
-        button_layout.addWidget(self.export_locpack_btn)
-
-        # Help — sits with the other toolbar buttons rather than floating
-        # right; uses the 'open' role so it shares the blue/cyan/gold
-        # information-action palette with Open Localization Dir.
-        self.help_btn = QPushButton("Help")
-        self.help_btn.setStyleSheet(
-            f"background-color: {get_button_color('open')}; color: {get_button_text_color()}; font-weight: bold; padding: 6px;"
-        )
-        self.help_btn.setCheckable(True)
-        self.help_btn.setToolTip("Toggle the Help side-panel")
-        self.help_btn.clicked.connect(self.show_help)
-        button_layout.addWidget(self.help_btn)
-
-        # Tutorial — shares the 'open' blue/cyan/gold info-action role with
-        # Help so the two read as a pair. Always restartable on demand.
-        self.tutorial_btn = QPushButton("Tutorial")
-        self.tutorial_btn.setStyleSheet(
-            f"background-color: {get_button_color('open')}; color: {get_button_text_color()}; font-weight: bold; padding: 6px;"
-        )
-        self.tutorial_btn.setToolTip(
-            "Start the guided tour of the workflow — runs automatically on first launch; click here anytime to replay."
-        )
-        self.tutorial_btn.clicked.connect(self._start_tutorial)
-        button_layout.addWidget(self.tutorial_btn)
-
-        button_layout.addStretch()
-
-        layout.addLayout(button_layout)
-
-        # Filter row
-        filter_layout = QHBoxLayout()
-
-        filter_layout.addWidget(QLabel("Category:"))
-        self.category_combo = QComboBox()
-        self.category_combo.setMinimumWidth(200)
-        self.category_combo.setToolTip(
-            "Filter rows by domain (Ships, Ship Items, Missions, Gear, Commodities, Journal, Other). Categories are derived from the loc-key prefix."
-        )
-        self.category_combo.currentTextChanged.connect(self.apply_filters)
-        filter_layout.addWidget(self.category_combo)
-
-        filter_layout.addWidget(QLabel("Status:"))
-        self.status_combo = QComboBox()
-        self.status_combo.addItems(["All", "Modified", "Enhanced", "Unmodified", "New"])
-        self.status_combo.setMaximumWidth(120)
-        self.status_combo.setToolTip(
-            "Filter by status. "
-            "Modified = you've set a Custom Value; "
-            "Enhanced = produced by the enhancements pipeline (ship stats, mission rewards, etc.); "
-            "Unmodified = default text only; "
-            "New = key exists only in enhancements/user.ini, not in the base file."
-        )
-        self.status_combo.currentTextChanged.connect(self.apply_filters)
-        filter_layout.addWidget(self.status_combo)
-
-        self.hide_unmodified_check = QCheckBox("Hide Unmodified")
-        self.hide_unmodified_check.setToolTip(
-            "Show only rows where you've set a Custom Value. Same as the Status filter's Modified option but togglable on its own."
-        )
-        self.hide_unmodified_check.stateChanged.connect(self.apply_filters)
-        filter_layout.addWidget(self.hide_unmodified_check)
-
-        self.favorites_only_check = QCheckBox("★ Favorites Only")
-        self.favorites_only_check.setToolTip(
-            "Show only rows you've starred as favorites. Favorites get a configurable prefix prepended to their name so they sort to the top of the in-game list."
-        )
-        self.favorites_only_check.stateChanged.connect(self.apply_filters)
-        filter_layout.addWidget(self.favorites_only_check)
-
-        self.grouped_sort_btn = QPushButton("Group Sort")
-        self.grouped_sort_btn.setToolTip("Sort titles and descriptions together for the same entity")
-        self.grouped_sort_btn.setMaximumWidth(100)
-        self.grouped_sort_btn.clicked.connect(self._on_grouped_sort)
-        filter_layout.addWidget(self.grouped_sort_btn)
-
-        self.clear_filters_btn = QPushButton("Clear Filters")
-        self.clear_filters_btn.setMaximumWidth(100)
-        self.clear_filters_btn.setToolTip(
-            "Reset every filter (category, status, search, per-column boxes, checkboxes) so the full table is shown."
-        )
-        self.clear_filters_btn.clicked.connect(self.clear_filters)
-        filter_layout.addWidget(self.clear_filters_btn)
-
-        self.copy_filtered_btn = QPushButton("Copy Filtered")
-        self.copy_filtered_btn.setMaximumWidth(100)
-        self.copy_filtered_btn.setToolTip("Copy all visible filtered rows to clipboard (tab-separated)")
-        self.copy_filtered_btn.clicked.connect(self.copy_filtered_to_clipboard)
-        filter_layout.addWidget(self.copy_filtered_btn)
-
-        filter_layout.addStretch()
-        layout.addLayout(filter_layout)
-
-        return layout
+        """Delegate to window_setup.create_toolbar."""
+        return self._ws.create_toolbar(self)
 
     def create_strings_tab(self) -> QWidget:
-        """Create strings table tab."""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-
-        # Model
-        self._model = StringTableModel(self)
-
-        # Table view
-        self.table = QTableView()
-        self.table.setModel(self._model)
-
-        # Per-column filter header
-        column_names = ["Category", "Key", "Default Value", "Current Value", "★", "Custom Value", "Status"]
-        self.filter_header = FilterHeaderView(column_names, self.table, skip_columns={0, 4, 6})
-        self.table.setHorizontalHeader(self.filter_header)
-        self.filter_header.filter_changed.connect(self.apply_filters)
-
-        # Table settings
-        self.table.setAlternatingRowColors(True)
-        self.table.setSortingEnabled(True)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.table.customContextMenuRequested.connect(self.show_context_menu)
-
-        # Hide row numbers
-        vertical_header = self.table.verticalHeader()
-        if vertical_header is not None:
-            vertical_header.setVisible(False)
-
-        # Set column widths
-        header = self.filter_header
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # Category
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Key
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)  # Default Value
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)  # Current Value
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # ★
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)  # Custom Value
-        header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)  # Status
-
-        # Set custom delegate for editing Custom Value column (col 5)
-        self.table.setItemDelegateForColumn(COL_CUSTOM, SelectAllDelegate())
-        # Star column click handling
-        self.table.clicked.connect(self._on_cell_clicked)
-
-        layout.addWidget(self.table)
-
-        # Hook selection after the model is attached so selectionModel() exists.
-        # Drives the top-right preview pane created in setup_ui().
-        selection_model = self.table.selectionModel()
-        if selection_model is not None:
-            selection_model.currentRowChanged.connect(self._on_preview_row_changed)
-
-        # Status label
-        self.table_status_label = QLabel("No data loaded")
-        layout.addWidget(self.table_status_label)
-
-        return widget
+        """Delegate to window_setup.create_strings_tab."""
+        return self._ws.create_strings_tab(self)
 
     def create_about_tab(self) -> QWidget:
-        """Create about tab."""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-
-        self.about_browser = QTextBrowser()
-        self.about_browser.setOpenExternalLinks(True)
-        self._render_about_html()
-        layout.addWidget(self.about_browser)
-
-        btn_row = QHBoxLayout()
-        self._check_update_btn = QPushButton("Check for Updates")
-        self._check_update_btn.setMaximumWidth(180)
-        self._check_update_btn.setToolTip("Check whether a newer version of Open Strings is available on GitHub")
-        self._check_update_btn.clicked.connect(lambda: self._check_for_app_update(manual=True))
-        btn_row.addWidget(self._check_update_btn)
-        btn_row.addStretch()
-        layout.addLayout(btn_row)
-
-        return widget
+        """Delegate to window_setup.create_about_tab."""
+        return self._ws.create_about_tab(self)
 
     def _render_about_html(self):
-        """(Re)render the About tab HTML using the current palette. Also
-        force the browser's palette to match so its chrome (viewport bg,
-        scrollbars) tracks the theme — widget-local palette can otherwise
-        lag behind QApplication.setPalette."""
-        from PyQt6.QtWidgets import QApplication
-
-        self.about_browser.setPalette(QApplication.palette())
-        try:
-            about_path = get_resource_path("ABOUT.md")
-            with open(about_path, encoding="utf-8") as f:
-                about_content = f.read()
-            about_content = about_content.replace("# Open Strings", f"# Open Strings v{get_version()}")
-            self.about_browser.setHtml(self.markdown_to_html(about_content))
-        except Exception as e:
-            logger.error(f"Error loading ABOUT.md: {e}", exc_info=True)
-            self.about_browser.setHtml(
-                f"<h1>About</h1><p>Unable to load about information.</p><p style='color: gray;'>{str(e)}</p>"
-            )
+        """Delegate to window_setup.render_about_html."""
+        self._ws.render_about_html(self)
 
     @pyqtSlot()
     def _set_toolbar_enabled(self, enabled: bool):
@@ -1130,9 +869,8 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot()
     def _apply_branding_styles(self):
-        """Apply per-theme colors to the title + tagline header labels."""
-        self.title_label.setStyleSheet(f"color: {get_title_color()};")
-        self.tagline_label.setStyleSheet(f"font-size: 11px; letter-spacing: 2px; color: {get_tagline_color()};")
+        """Delegate to window_setup.apply_branding_styles."""
+        self._ws.apply_branding_styles(self)
 
     def refresh_action_buttons(self):
         """Re-apply theme-dependent stylesheets on the toolbar action buttons
@@ -1305,7 +1043,6 @@ class MainWindow(QMainWindow):
             QHBoxLayout,
             QLabel,
             QLineEdit,
-            QPushButton,
             QVBoxLayout,
         )
 
@@ -1393,66 +1130,12 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot()
     def _ensure_help_dock(self) -> QDockWidget:
-        """Create the side-docked Help panel on first use and return it.
-
-        The panel is a QDockWidget docked to the right edge so users can keep
-        the guide open as a reference while editing. Users can drag it to the
-        left, undock it into a floating window, or close it via the title-bar
-        X. Qt restores its last state (position, width, visibility) on the
-        next launch because saveState/restoreState are already wired into
-        restore_window_state. An objectName is required for that mapping.
-        """
-        if self.help_dock is not None:
-            return self.help_dock
-
-        dock = QDockWidget("Help", self)
-        dock.setObjectName("helpDock")  # needed by restoreState
-        dock.setAllowedAreas(Qt.DockWidgetArea.RightDockWidgetArea | Qt.DockWidgetArea.LeftDockWidgetArea)
-        dock.setFeatures(
-            QDockWidget.DockWidgetFeature.DockWidgetClosable
-            | QDockWidget.DockWidgetFeature.DockWidgetMovable
-            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
-        )
-
-        self.help_browser = QTextBrowser(dock)
-        self.help_browser.setOpenExternalLinks(True)
-        dock.setWidget(self.help_browser)
-
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
-        self.help_dock = dock
-
-        # Keep the Help button's checked state in sync if the user closes the
-        # dock via its title-bar X instead of the toolbar button.
-        dock.visibilityChanged.connect(self._on_help_dock_visibility_changed)
-
-        self._render_help_html()
-        return dock
+        """Delegate to window_setup.ensure_help_dock."""
+        return self._ws.ensure_help_dock(self)
 
     def _render_help_html(self):
-        """(Re)render the Help panel's HTML using the current palette.
-
-        Mirrors _render_about_html — forces the browser's palette to the app
-        palette so its viewport/scrollbar chrome tracks theme swaps, then
-        reloads HELP.md (bundled via OpenStrings.spec). Falls back to a
-        short stub if the file is missing so a misconfigured build still
-        shows something usable instead of a blank panel.
-        """
-        if not hasattr(self, "help_browser"):
-            return
-        from PyQt6.QtWidgets import QApplication
-
-        self.help_browser.setPalette(QApplication.palette())
-        try:
-            help_path = get_resource_path("HELP.md")
-            with open(help_path, encoding="utf-8") as f:
-                help_markdown = f.read()
-            self.help_browser.setHtml(self.markdown_to_html(help_markdown))
-        except Exception as e:
-            logger.error(f"Error loading HELP.md: {e}", exc_info=True)
-            self.help_browser.setHtml(
-                "<h1>Help</h1><p>Help content could not be loaded. "
-                "See the About tab or the project README for usage details.</p>"
-            )
+        """Delegate to window_setup.render_help_html."""
+        self._ws.render_help_html(self)
 
     def _on_help_dock_visibility_changed(self, visible: bool):
         """Keep the toolbar Help button's checked state in sync with the dock."""
@@ -2185,7 +1868,7 @@ class MainWindow(QMainWindow):
         Returns:
             Set of selected category keys, or None if user clicked Skip.
         """
-        from PyQt6.QtWidgets import QCheckBox, QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+        from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QVBoxLayout
 
         # Collapse the missing-file list down to the set of category checkboxes
         # the user will actually see. The dialog is category-shaped, not
