@@ -1,7 +1,6 @@
 """Main window for Open Strings."""
 
 import html as _html_mod
-import json
 import logging
 import os
 import re as _re_mod
@@ -32,7 +31,6 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.gui.coach_mark import CoachMarkStep, TutorialTour
 from src.gui.config_tab import ConfigTab
 from src.gui.enhancements_tab import EnhancementsTab
 from src.gui.log_tab import LogTab
@@ -161,7 +159,6 @@ class MainWindow(QMainWindow):
         self._check_enhancements_after_loading = False
 
         self.help_dock: QDockWidget | None = None
-        self._tutorial_tour: TutorialTour | None = None
 
         # Status-bar manager (owns spinner, channel/version indicators, status text)
         from src.gui.status_bar_manager import StatusBarManager  # noqa: PLC0415
@@ -201,6 +198,12 @@ class MainWindow(QMainWindow):
         self.worker_coord.startup_source_synced.connect(self._on_startup_source_synced)
         self.worker_coord.startup_source_error.connect(self._on_startup_source_error)
         self.worker_coord.startup_sync_finished.connect(self._on_startup_sync_finished)
+
+        # Tutorial manager — guides first-run; emits tour_finished when done or skipped
+        from src.gui.tutorial_manager import TutorialManager  # noqa: PLC0415
+
+        self.tutorial_mgr = TutorialManager(self)
+        self.tutorial_mgr.tour_finished.connect(self._start_post_tutorial_tasks)
 
         # Ensure cache directory exists
         AppSettings.get_cache_dir()
@@ -1127,122 +1130,9 @@ class MainWindow(QMainWindow):
 
     # ── Guided tour (coach-marks) ─────────────────────────────────────────────
 
-    def _tutorial_step_wiring(self) -> dict[str, dict]:
-        """Map each tutorial step id to its widget-targeting logic.
-
-        Kept in code — not in JSON — because target and pre_action are
-        closures over `self`/QWidget references that can't be serialized.
-        The user-editable copy (title / description / order / inclusion)
-        lives in ``assets/tutorial.json`` and is keyed by these ids.
-
-        Each value is a dict with:
-            target:     Callable[[], QWidget | None]
-            pre_action: Optional[Callable[[], None]]
-        """
-
-        def _switch_to(tab_index: int):
-            def _action():
-                if hasattr(self, "tabs"):
-                    self.tabs.setCurrentIndex(tab_index)
-
-            return _action
-
-        strings_tab = getattr(self, "_strings_tab_index", 0)
-        config_tab = getattr(self, "_config_tab_index", 1)
-        enh_tab = getattr(self, "_enhancements_tab_index", 2)
-
-        return {
-            "welcome": {"target": lambda: None, "pre_action": None},
-            "extract": {"target": lambda: self.config_tab._extract_btn, "pre_action": _switch_to(config_tab)},
-            "edit": {"target": lambda: self.table, "pre_action": _switch_to(strings_tab)},
-            "preview": {"target": lambda: self.preview_pane, "pre_action": _switch_to(strings_tab)},
-            "apply": {"target": lambda: self.apply_btn, "pre_action": None},
-            "enhancements": {
-                "target": lambda: self.enhancements_tab._generate_enhancements_btn,
-                "pre_action": _switch_to(enh_tab),
-            },
-            "help": {"target": lambda: self.help_btn, "pre_action": _switch_to(strings_tab)},
-        }
-
-    def _build_tutorial_steps(self) -> list[CoachMarkStep]:
-        """Assemble the tour by combining ``assets/tutorial.json`` (content)
-        with ``_tutorial_step_wiring()`` (targets).
-
-        Order and inclusion are driven by the JSON — reorder or remove entries
-        there to change the tour without touching code. Entries whose ``id``
-        has no matching wiring are skipped with a warning (so a typo in the
-        JSON surfaces in the Log Tab rather than crashing the tour).
-        """
-
-        wiring = self._tutorial_step_wiring()
-
-        try:
-            tutorial_path = Path(get_resource_path("assets/tutorial.json"))
-            with tutorial_path.open("r", encoding="utf-8") as f:
-                payload = json.load(f)
-        except (OSError, json.JSONDecodeError) as e:
-            logger.error(f"Could not load assets/tutorial.json: {e} — tour disabled")
-            return []
-
-        raw_steps = payload.get("steps", [])
-        steps: list[CoachMarkStep] = []
-        for raw in raw_steps:
-            step_id = raw.get("id")
-            if not step_id:
-                logger.warning(f"Tutorial step missing 'id'; skipped: {raw!r}")
-                continue
-            w = wiring.get(step_id)
-            if w is None:
-                logger.warning(f"Tutorial step id {step_id!r} has no wiring entry in _tutorial_step_wiring(); skipped")
-                continue
-            title = raw.get("title", "")
-            description = raw.get("description", "")
-            if not title or not description:
-                logger.warning(f"Tutorial step {step_id!r} missing title/description; skipped")
-                continue
-            steps.append(
-                CoachMarkStep(
-                    target=w["target"],
-                    title=title,
-                    description=description,
-                    pre_action=w.get("pre_action"),
-                    preferred_side=raw.get("preferred_side", "auto"),
-                )
-            )
-
-        return steps
-
     def _start_tutorial(self) -> None:
-        """Launch the guided tour. Safe to call repeatedly; a running tour is ignored."""
-        if self._tutorial_tour is not None and self._tutorial_tour.is_running():
-            return
-        try:
-            self._tutorial_tour = TutorialTour(self, self._build_tutorial_steps())
-            self._tutorial_tour.finished.connect(self._on_tutorial_finished)
-            self._tutorial_tour.start()
-        except Exception:
-            # Don't let a broken tour strand the deferred startup tasks —
-            # users without sources synced / update checks would never see
-            # P4K prompts or the new-version notice.
-            logger.exception("Tutorial failed to launch; running deferred startup tasks anyway")
-            self._tutorial_tour = None
-            self._start_post_tutorial_tasks()
-
-    def _on_tutorial_finished(self, completed: bool) -> None:
-        """Record tutorial as seen on both Finish and Skip.
-
-        Prior behaviour only persisted on Finish so accidental skips wouldn't
-        lock users out. Community feedback reversed that: power users who
-        deliberately skip were re-prompted on every version bump, which is
-        worse than the accidental-skip risk. The Tutorial button on the toolbar
-        is always available for on-demand replay.
-        """
-        AppSettings.set_tutorial_completed_version(get_version())
-        self._tutorial_tour = None
-        # Now that the user is past (or has skipped) the tour, fire the
-        # deferred startup tasks. Their modal prompts would otherwise pop
-        # over the coach-mark overlay and break first-run.
-        self._start_post_tutorial_tasks()
+        """Delegate to TutorialManager.start_tutorial."""
+        self.tutorial_mgr.start_tutorial()
 
     def _start_post_tutorial_tasks(self) -> None:
         """Fire the deferred startup tasks (source sync + app-update check) once.
@@ -1264,33 +1154,9 @@ class MainWindow(QMainWindow):
         """Delegate to UpdateManager.check_for_update."""
         self.update_mgr.check_for_update(manual=manual)
 
-    def _maybe_start_first_run_tutorial(self) -> None:
-        """Auto-start the tour on first launch of a version whose tour wasn't seen.
-
-        Matching on version (not a boolean) means we can re-trigger the tour
-        in a future release if we add meaningful steps worth showing again.
-        Hooked from showEvent so widgets have geometry; a short QTimer delay
-        lets the restore-window-state pass finish before we compute spotlight
-        rectangles.
-
-        Also responsible for kicking off the deferred startup tasks (source
-        sync + app-update check). On a first-run launch the tour starts and
-        those tasks are held back until ``_on_tutorial_finished``; otherwise
-        they fire here on the next event-loop tick.
-        """
-        if getattr(self, "_tutorial_first_run_checked", False):
-            return
-        self._tutorial_first_run_checked = True
-        last_seen = AppSettings.get_tutorial_completed_version()
-        current = get_version()
-        if last_seen == current:
-            QTimer.singleShot(0, self._start_post_tutorial_tasks)
-            return
-        QTimer.singleShot(400, self._start_tutorial)
-
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        self._maybe_start_first_run_tutorial()
+        self.tutorial_mgr.maybe_start_first_run()
 
     def keyPressEvent(self, event):
         """Handle keyboard shortcuts."""
