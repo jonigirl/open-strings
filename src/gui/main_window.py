@@ -7,7 +7,6 @@ import os
 import re as _re_mod
 import shutil
 import tempfile
-import time
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -44,7 +43,6 @@ from src.gui.string_table_model import (
 from src.gui.theme import BRAND_FONT_FAMILY, get_button_color, get_button_text_color
 from src.gui.workers import (
     AnimatedProgressDialog,
-    AppUpdateCheckerWorker,
     get_resource_path,
 )
 from src.merger.ini_merger import merge_sources_by_hierarchy
@@ -154,11 +152,8 @@ class MainWindow(QMainWindow):
 
         # Data
         self.entries: list[StringEntry] = []
-        self.filtered_row_indices: list[int] = []
+        self.filtered_row_indices: list[int] = []  # noqa: F841  # kept for external compat
         self.default_values: dict[str, str] = {}  # Store default values from cached base source
-
-        # App update checker worker (Phase 6: deferred from WorkerCoordinator)
-        self._update_checker_worker: AppUpdateCheckerWorker | None = None
 
         # Track whether we've prompted for enhancements on startup (prevents duplicate dialogs)
         self._enhancements_prompted_on_startup = False
@@ -172,6 +167,11 @@ class MainWindow(QMainWindow):
         from src.gui.status_bar_manager import StatusBarManager  # noqa: PLC0415
 
         self.status_bar_mgr = StatusBarManager(self)
+
+        # Update manager — owns AppUpdateCheckerWorker and result dialogs
+        from src.gui.update_manager import UpdateManager  # noqa: PLC0415
+
+        self.update_mgr = UpdateManager(self)
 
         # Worker coordinator — owns all background worker instances and progress dialogs
         from src.gui.worker_coordinator import WorkerCoordinator  # noqa: PLC0415
@@ -763,34 +763,16 @@ class MainWindow(QMainWindow):
 
     @timed
     def _snapshot_pending_user_edits(self) -> dict:
-        """Return {key: custom_value} for in-memory edits that may not be on disk.
+        """Delegate to pending_edits.snapshot_pending_edits."""
+        from src.utils.pending_edits import snapshot_pending_edits  # noqa: PLC0415
 
-        Reload paths (Config-tab save, Generate Enhancements completion, etc.)
-        rebuild self.entries from disk sources — which means custom_value comes
-        only from user.ini. Edits the user made but hasn't yet Applied live
-        only in memory; without snapshotting them here they'd be silently
-        wiped by the reload.
-        """
-        return {e.key: e.custom_value for e in self.entries if e.custom_value}
+        return snapshot_pending_edits(self.entries)
 
     def _restore_pending_user_edits(self, entries: list, snapshot: dict) -> int:
-        """Re-apply *snapshot* on top of freshly-loaded *entries*.
+        """Delegate to pending_edits.restore_pending_edits."""
+        from src.utils.pending_edits import restore_pending_edits  # noqa: PLC0415
 
-        Mirrors inline-edit setData semantics: status flips Modified if the
-        restored value differs from the new original, Unmodified otherwise.
-        Returns the count actually restored.
-        """
-        if not snapshot:
-            return 0
-        restored = 0
-        for e in entries:
-            pending = snapshot.get(e.key)
-            if pending is None or pending == e.custom_value:
-                continue
-            e.custom_value = pending
-            e.status = "Modified" if pending != e.original_value else "Unmodified"
-            restored += 1
-        return restored
+        return restore_pending_edits(entries, snapshot)
 
     @pyqtSlot()
     @timed
@@ -1274,81 +1256,13 @@ class MainWindow(QMainWindow):
             return
         self._post_tutorial_tasks_started = True
         self._start_startup_sync()
-        self._check_for_app_update(manual=False)
+        self.update_mgr.check_for_update(manual=False)
 
     # ── App update check ─────────────────────────────────────────────────────
 
-    _UPDATE_CHECK_INTERVAL = 6 * 60 * 60  # 6 hours between auto-checks
-
     def _check_for_app_update(self, manual: bool = False) -> None:
-        """Start an async app-update check.
-
-        Auto-checks are throttled to once every 6 hours.  Manual checks
-        (triggered from the About tab button) always run and show feedback
-        regardless of outcome.  A second call while a check is already
-        running is silently ignored.
-        """
-        if self._update_checker_worker is not None and self._update_checker_worker.isRunning():
-            return
-
-        if not manual:
-            last = AppSettings.get_last_update_check_epoch()
-            if last and (time.time() - last) < self._UPDATE_CHECK_INTERVAL:
-                return
-
-        self._update_checker_worker = AppUpdateCheckerWorker()
-        self._update_checker_worker.finished.connect(
-            lambda ok, ver, url: self._on_update_check_finished(ok, ver, url, manual=manual)
-        )
-        self._update_checker_worker.error.connect(lambda msg: self._on_update_check_error(msg, manual=manual))
-        self._update_checker_worker.start()
-
-        if manual:
-            self._status_bar().showMessage("Checking for updates…")
-
-    @pyqtSlot(bool, str, str)
-    def _on_update_check_finished(
-        self, update_available: bool, new_version: str, release_url: str, *, manual: bool
-    ) -> None:
-        """Handle the result of an update check."""
-        if self._update_checker_worker is not None:
-            self._update_checker_worker.quit()
-            self._update_checker_worker.wait()
-            self._update_checker_worker = None
-
-        if update_available:
-            msg_box = QMessageBox(self)
-            msg_box.setWindowTitle("Update Available")
-            msg_box.setIcon(QMessageBox.Icon.Information)
-            msg_box.setText(f"<b>Open Strings v{new_version}</b> is available.")
-            msg_box.setInformativeText(
-                "Click <b>Open Release Page</b> to download the new version,\nor <b>Later</b> to dismiss."
-            )
-            open_btn = msg_box.addButton("Open Release Page", QMessageBox.ButtonRole.AcceptRole)
-            msg_box.addButton("Later", QMessageBox.ButtonRole.RejectRole)
-            msg_box.exec()
-            if msg_box.clickedButton() is open_btn:
-                QDesktopServices.openUrl(QUrl(release_url))
-        elif manual:
-            QMessageBox.information(self, "Up to Date", f"You are running the latest version ({get_version()}).")
-
-        if manual:
-            self._status_bar().showMessage("Ready")
-
-    def _on_update_check_error(self, message: str, *, manual: bool) -> None:
-        """Handle update check network failure."""
-        if self._update_checker_worker is not None:
-            self._update_checker_worker.quit()
-            self._update_checker_worker.wait()
-            self._update_checker_worker = None
-
-        if manual:
-            QMessageBox.warning(
-                self,
-                "Update Check Failed",
-                f"Could not reach the update server.\n\nDetail: {message}",
-            )
-            self._status_bar().showMessage("Ready")
+        """Delegate to UpdateManager.check_for_update."""
+        self.update_mgr.check_for_update(manual=manual)
 
     def _maybe_start_first_run_tutorial(self) -> None:
         """Auto-start the tour on first launch of a version whose tour wasn't seen.
@@ -1910,9 +1824,7 @@ class MainWindow(QMainWindow):
         # Without this, Qt may tear down the window mid-operation and leave threads
         # in an undefined state or DataForge temp files half-written.
         self.worker_coord.cleanup_all()
-        if self._update_checker_worker is not None and self._update_checker_worker.isRunning():
-            self._update_checker_worker.quit()
-            self._update_checker_worker.wait(5000)
+        self.update_mgr.cleanup()
 
         # Flush registry writes
         AppSettings.settings().sync()
