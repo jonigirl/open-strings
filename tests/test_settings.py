@@ -527,3 +527,65 @@ class TestJsonSettingsStore:
         store.setValue("k", "v")
         store.sync()
         assert store.value("k") == "v"
+
+    def test_load_corrupt_json_starts_empty(self, tmp_path):
+        """Corrupt JSON on disk should produce a clean empty store (non-fatal)."""
+        from src.utils.settings import _JsonSettingsStore
+
+        path = tmp_path / "bad.json"
+        path.write_text("this is not { valid json", encoding="utf-8")
+        store = _JsonSettingsStore(path)
+        assert store.value("any/key") is None
+
+    def test_load_non_dict_json_starts_empty(self, tmp_path):
+        """A JSON file whose root is a list (not dict) should produce a clean store."""
+        from src.utils.settings import _JsonSettingsStore
+
+        path = tmp_path / "list.json"
+        path.write_text("[1, 2, 3]", encoding="utf-8")
+        store = _JsonSettingsStore(path)
+        assert store.value("any/key") is None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _apply_installer_handoff — positive path
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestApplyInstallerHandoff:
+    def test_applies_handoff_values_and_deletes_file(self, tmp_path, monkeypatch):
+        """When handoff JSON exists it should be read, applied, and deleted."""
+        import src.utils.settings as settings_mod
+        from src.utils.settings import _JsonSettingsStore
+
+        monkeypatch.setattr(settings_mod, "_handoff_applied", False)
+
+        store = _JsonSettingsStore(tmp_path / "settings.json")
+        handoff = tmp_path / "installer-handoff.json"
+        handoff.write_text('{"sc_install_root": "C:\\\\RSI\\\\SC"}', encoding="utf-8")
+
+        # Patch _path so the handoff file is found in tmp_path
+        store._path = tmp_path / "settings.json"
+
+        settings_mod._apply_installer_handoff(store)
+
+        assert store.value("sc_install_root") == "C:\\RSI\\SC"
+        assert not handoff.exists()
+
+    def test_is_idempotent_when_already_applied(self, tmp_path, monkeypatch):
+        """Second call should be a no-op even if handoff file is present."""
+        import src.utils.settings as settings_mod
+        from src.utils.settings import _JsonSettingsStore
+
+        monkeypatch.setattr(settings_mod, "_handoff_applied", True)
+
+        store = _JsonSettingsStore(tmp_path / "settings.json")
+        handoff = tmp_path / "installer-handoff.json"
+        handoff.write_text('{"sc_install_root": "C:\\\\RSI\\\\SC"}', encoding="utf-8")
+        store._path = tmp_path / "settings.json"
+
+        settings_mod._apply_installer_handoff(store)
+
+        # Should not have been applied — key still absent
+        assert store.value("sc_install_root") is None
+        assert handoff.exists()

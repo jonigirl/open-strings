@@ -69,6 +69,15 @@ class TestSaveUserIniDict:
         save_user_ini_dict({"k": "v"}, deep_path)
         assert deep_path.exists()
 
+    def test_write_failure_raises(self, tmp_path, monkeypatch):
+        """IOError during write should propagate out of _write_kv_to_path."""
+        from unittest.mock import patch
+
+        path = tmp_path / "user.ini"
+        with patch("builtins.open", side_effect=OSError("disk full")):
+            with pytest.raises(OSError, match="disk full"):
+                save_user_ini_dict({"k": "v"}, path)
+
 
 class TestShouldAutosaveUserIni:
     def test_returns_true_when_entry_is_modified(self, tmp_path):
@@ -148,3 +157,17 @@ class TestGenerateUserIniFromDiff:
         result = generate_user_ini_from_diff(ref, current, user_ini)
         assert result == 1
         assert "new_key=brand_new" in user_ini.read_text(encoding="utf-8")
+
+    def test_returns_zero_and_logs_on_parse_exception(self, tmp_path, monkeypatch):
+        """An exception during parse should be caught and return 0 (non-fatal)."""
+        from src.utils import user_ini_manager
+
+        ref = tmp_path / "ref.ini"
+        ref.write_text("k=v\n", encoding="utf-8")
+        current = tmp_path / "current.ini"
+        current.write_text("k=changed\n", encoding="utf-8")
+
+        monkeypatch.setattr(user_ini_manager, "parse_ini_file", lambda *_: (_ for _ in ()).throw(OSError("read error")))
+
+        result = generate_user_ini_from_diff(ref, current, tmp_path / "user.ini")
+        assert result == 0

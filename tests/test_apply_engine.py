@@ -87,9 +87,30 @@ class TestCreateApplyBackup:
         for bak in existing:
             assert bak.exists()
 
+    def test_prune_oserror_is_swallowed(self, tmp_path):
+        """OSError during oldest-backup unlink is logged but does not raise."""
+        target = tmp_path / "global.ini"
+        target.write_text("x=1", encoding="utf-8")
+        backups_dir = tmp_path / "backups"
+        backups_dir.mkdir()
 
-# ─────────────────────────────────────────────────────────────────────────────
-# find_apply_base_file
+        import os
+        import time
+
+        existing = []
+        for i in range(5):
+            bak = backups_dir / f"global.ini.bak_2026010{i}_000000"
+            bak.write_text(f"b{i}", encoding="utf-8")
+            mtime = time.time() - (5 - i) * 3600
+            os.utime(bak, (mtime, mtime))
+            existing.append(bak)
+
+        with patch("src.utils.apply_engine.Path.unlink", side_effect=OSError("locked")):
+            result = create_apply_backup(target, backups_dir, max_backups=5)
+
+        assert result is not None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 
 

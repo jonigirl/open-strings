@@ -393,3 +393,93 @@ class TestStartupSync:
 
         coord._on_startup_source_error("global", "timeout")
         assert errors == [("global", "timeout")]
+
+
+# ── is_file_loading / is_startup_sync_running accessors ───────────────────────
+
+
+class TestStatusAccessors:
+    def test_is_file_loading_false_when_no_worker(self, qtbot):
+        coord, _ = _make_coordinator(qtbot)
+        assert not coord.is_file_loading()
+
+    def test_is_file_loading_true_when_running(self, qtbot):
+        coord, _ = _make_coordinator(qtbot)
+        w = _mock_worker()
+        w.isRunning.return_value = True
+        coord._loader_worker = w
+        assert coord.is_file_loading()
+
+    def test_is_file_loading_false_when_worker_stopped(self, qtbot):
+        coord, _ = _make_coordinator(qtbot)
+        w = _mock_worker()
+        w.isRunning.return_value = False
+        coord._loader_worker = w
+        assert not coord.is_file_loading()
+
+    def test_is_startup_sync_running_false_when_none(self, qtbot):
+        coord, _ = _make_coordinator(qtbot)
+        assert not coord.is_startup_sync_running()
+
+    def test_is_startup_sync_running_true_when_set(self, qtbot):
+        coord, _ = _make_coordinator(qtbot)
+        coord._startup_sync_worker = _mock_worker()
+        assert coord.is_startup_sync_running()
+
+
+# ── Enhancements pipeline — start_enhancements_pipeline routing ───────────────
+
+
+class TestEnhancementsPipelineRouting:
+    def test_pipeline_routes_to_generation_when_forge_fresh(self, qtbot):
+        coord, _ = _make_coordinator(qtbot)
+
+        with (
+            patch("src.utils.pak_extractor.dataforge_cache_is_fresh", return_value=True),
+            patch.object(coord, "start_enhancements_generation") as mock_gen,
+            patch("src.utils.settings.AppSettings.get_dataforge_cache_dir"),
+            patch("src.utils.settings.AppSettings.get_p4k_path"),
+        ):
+            coord.start_enhancements_pipeline()
+        mock_gen.assert_called_once()
+
+    def test_pipeline_routes_to_dataforge_when_stale(self, qtbot):
+        coord, _ = _make_coordinator(qtbot)
+
+        with (
+            patch("src.utils.pak_extractor.dataforge_cache_is_fresh", return_value=False),
+            patch.object(coord, "start_dataforge_extraction") as mock_forge,
+            patch("src.utils.settings.AppSettings.get_dataforge_cache_dir"),
+            patch("src.utils.settings.AppSettings.get_p4k_path"),
+        ):
+            coord.start_enhancements_pipeline()
+        mock_forge.assert_called_once()
+
+    def test_pipeline_noop_when_enhancements_worker_active(self, qtbot):
+        coord, _ = _make_coordinator(qtbot)
+        coord._enhancements_worker = _mock_worker()
+
+        with patch.object(coord, "start_enhancements_generation") as mock_gen:
+            coord.start_enhancements_pipeline()
+        mock_gen.assert_not_called()
+
+    def test_pipeline_noop_when_forge_worker_active(self, qtbot):
+        coord, _ = _make_coordinator(qtbot)
+        coord._forge_worker = _mock_worker()
+
+        with patch.object(coord, "start_dataforge_extraction") as mock_forge:
+            coord.start_enhancements_pipeline()
+        mock_forge.assert_not_called()
+
+
+# ── _on_dataforge_err ─────────────────────────────────────────────────────────
+
+
+class TestDataforgeError:
+    def test_dataforge_err_is_logged(self, qtbot, caplog):
+        import logging
+
+        coord, _ = _make_coordinator(qtbot)
+        with caplog.at_level(logging.ERROR, logger="src.gui.worker_coordinator"):
+            coord._on_dataforge_err("disk full")
+        assert "disk full" in caplog.text

@@ -197,3 +197,44 @@ class TestMarkdownToHtml:
         assert "<h2" in result
         assert "<p>" in result
         assert "<li>" in result
+
+    def test_list_closed_when_h1_follows_without_blank_line(self):
+        # Exercises the `if in_list: html += f"</{list_type}>"` branch in h1 handler
+        doc = "- item one\n- item two\n# Heading"
+        result = markdown_to_html(doc)
+        assert "</ul>" in result
+        assert "<h1" in result
+
+    def test_list_closed_when_h2_follows_without_blank_line(self):
+        doc = "- item\n## Sub"
+        result = markdown_to_html(doc)
+        assert "</ul>" in result
+        assert "<h2" in result
+
+    def test_list_closed_when_h3_follows_without_blank_line(self):
+        doc = "- item\n### Sub"
+        result = markdown_to_html(doc)
+        assert "</ul>" in result
+        assert "<h3" in result
+
+    def test_ol_closed_when_different_list_starts(self):
+        # An ordered list followed immediately by an unordered list should close
+        # the ol and open a ul (exercises the `if in_list: html += f"</{list_type}>"` inside ul branch)
+        doc = "1. ordered\n- unordered"
+        result = markdown_to_html(doc)
+        assert "</ol>" in result
+        assert "<ul>" in result
+
+    def test_empty_line_sets_prev_blank_when_not_in_list(self):
+        # Multiple blank lines between paragraphs — second blank should not add
+        # extra <p> (exercises elif not prev_blank: prev_blank = True path)
+        doc = "Para one.\n\n\nPara two."
+        result = markdown_to_html(doc)
+        assert result.count("<p>") == 2
+
+    def test_paragraph_closes_open_list(self):
+        # A paragraph immediately after a list (no blank line) closes the list
+        doc = "- item\nfollowing paragraph"
+        result = markdown_to_html(doc)
+        assert "</ul>" in result
+        assert "<p>" in result

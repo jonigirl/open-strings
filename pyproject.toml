@@ -65,7 +65,7 @@ addopts = [
     "--strict-markers",
     "--cov=src",
     "--cov-report=term-missing",
-    "--cov-fail-under=80",
+    "--cov-fail-under=83",
     "--timeout=30",
 ]
 markers = [

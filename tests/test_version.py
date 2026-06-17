@@ -36,3 +36,16 @@ def test_frozen_strips_whitespace_from_version(tmp_path):
         with patch.object(sys, "_MEIPASS", str(tmp_path), create=True):
             result = get_version()
     assert result == "2.0.0"
+
+
+def test_returns_fallback_when_version_txt_unreadable(tmp_path):
+    """If VERSION.TXT exists but read_text raises, fall back to 0.1.0."""
+    version_file = tmp_path / "VERSION.TXT"
+    version_file.write_text("1.2.3", encoding="utf-8")
+    with (
+        patch.object(sys, "frozen", True, create=True),
+        patch.object(sys, "_MEIPASS", str(tmp_path), create=True),
+        patch("src.utils.version.Path.read_text", side_effect=OSError("locked")),
+    ):
+        result = get_version()
+    assert result == "0.1.0"
