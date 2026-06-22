@@ -6,6 +6,23 @@
 
 Open Strings has returned to active development targeting Star Citizen 4.8.
 
+## 1.4.1 — Enhancement generator refactoring ✓ Released 2026-06-22
+
+- [x] Enhancement generator pipeline refactored: extracted shared XML and formatting utilities
+- [x] Decomposed main() into testable EnhancementPipeline class
+- [x] Added StatLineBuilder for DRY stat formatting (eliminates repetitive conditional logic)
+- [x] Added 42 edge case tests and integration test suite (+82 total tests)
+- [x] Full mypy strict type safety compliance across enhancement pipeline
+- [x] Net code reduction: -129 lines despite adding 4 new utility modules
+
+## 1.4.0 — Backup and startup fixes ✓ Released 2026-06-17
+
+- [x] Restoring a backup no longer crashes — reload after restore uses async loading path
+- [x] Startup freshness checks (DataForge, enhancements) no longer raise AttributeError when background worker is active
+- [x] Internal architecture: extracted AppConstants, ApplyEngine, CategoryClassifier, FileUtils, PreviewRenderer, StartupFlowManager, ResourceUtils
+- [x] Test coverage floor raised to 83%
+- [x] Build scripts support signing with trusted code-signing certificate (`build_all.bat --sign`)
+
 ## 1.3.9 — Settings & installer improvements ✓ Released 2026-05-21
 
 - [x] App settings migrated from Windows registry to plain JSON file in `%APPDATA%` — portable and survives reinstalls
