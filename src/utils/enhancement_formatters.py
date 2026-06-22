@@ -2,110 +2,60 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 
-
-def _fmt(value, unit: str = "", decimals: int = 0) -> str:
-    if value is None:
-        return "?"
-    try:
-        v = float(value)
-        if decimals:
-            return f"{v:,.{decimals}f}{unit}"
-        return f"{int(round(v)):,}{unit}"
-    except (TypeError, ValueError):
-        return str(value)
-
-
-def _find(root: ET.Element, tag: str) -> ET.Element | None:
-    return root.find(f".//{tag}")
-
-
-def _attr(root: ET.Element, tag: str, attr: str, default=None):
-    el = _find(root, tag)
-    return el.get(attr, default) if el is not None else default
-
-
-_OVERHEAT_PLACEHOLDER = 450_000
+from src.utils.dataforge_xml import attr as _attr
+from src.utils.dataforge_xml import find as _find
+from src.utils.dataforge_xml import find_by_type as _find_by_type
+from src.utils.dataforge_xml import find_resource as _find_resource
+from src.utils.dataforge_xml import poly_type as _poly_type
+from src.utils.formatting import OVERHEAT_PLACEHOLDER as _OVERHEAT_PLACEHOLDER
+from src.utils.formatting import fmt as _fmt
+from src.utils.stat_line_builder import StatLineBuilder
 
 
 # Hook points that are supplied by scripts/generate_enhancements_ini.py.
 # Lightweight defaults keep this module importable and test-safe.
-def _mission_loc_key(root):
+def _mission_loc_key(root: ET.Element) -> str | None:
     return None
 
 
-def _classify_mission_engagement(loc_key):
+def _classify_mission_engagement(loc_key: str) -> str:
     return "Ship"
 
 
-def _extract_mission_flags(root):
+def _extract_mission_flags(root: ET.Element) -> list[str]:
     return []
 
 
-def _extract_difficulty(element):
+def _extract_difficulty(element: ET.Element) -> str:
     return ""
 
 
-def _extract_mission_xp(root, reputation_lookup=None):
+def _extract_mission_xp(root: ET.Element, reputation_lookup: dict[str, int] | None = None) -> int:
     return 0
 
 
-def _extract_spawn_counts(element):
+def _extract_spawn_counts(element: ET.Element) -> tuple[int, int, int]:
     return (0, 0, 0)
 
 
-def _extract_turret_info(root):
+def _extract_turret_info(root: ET.Element) -> str | None:
     return None
 
 
-def _fire_rate(root):
+def _fire_rate(root: ET.Element) -> str | None:
     return None
 
 
-def _fire_modes(root, loc=None):
+def _fire_modes(root: ET.Element, loc: dict[str, str] | None = None) -> list[str]:
     return []
 
 
-def _loadout_summary(root):
+def _loadout_summary(root: ET.Element) -> tuple[str, str]:
     return ("", "")
 
 
-def _armor_stats_block(armor_root):
+def _armor_stats_block(armor_root: ET.Element) -> str:
     return ""
-
-
-def _poly_type(elem: ET.Element) -> str:
-    return elem.get("__type") or elem.tag
-
-
-def _find_by_type(root: ET.Element, type_name: str) -> ET.Element | None:
-    for el in root.iter():
-        if el.get("__type") == type_name or el.tag == type_name:
-            return el
-    return None
-
-
-def _resource_amount(amount_el: ET.Element) -> str | None:
-    unit = amount_el.find(".//SPowerSegmentResourceUnit")
-    if unit is not None:
-        return unit.get("units")
-    std = amount_el.find(".//SStandardResourceUnit")
-    if std is not None:
-        return std.get("standardResourceUnits")
-    micro = amount_el.find(".//SMicroResourceUnit")
-    if micro is not None:
-        return micro.get("microResourceUnits")
-    return None
-
-
-def _find_resource(root: ET.Element, resource: str) -> str | None:
-    for delta_type in ("ItemResourceDeltaGeneration", "ItemResourceDeltaConversion", "ItemResourceDeltaConsumption"):
-        for delta in root.iter(delta_type):
-            for child in delta:
-                if child.get("resource") == resource:
-                    val = _resource_amount(child)
-                    if val is not None:
-                        return val
-    return None
 
 
 def enhancements_shield(root: ET.Element) -> str:
@@ -137,17 +87,22 @@ def enhancements_shield(root: ET.Element) -> str:
         lo, hi = (mn, mx) if mn <= mx else (mx, mn)
         return f"{lo:+.0f}% - {hi:+.0f}%"
 
-    lines = []
+    builder = StatLineBuilder()
+
+    # Max HP and Regen on one line
     if hp is not None or regen is not None:
-        lines.append(f"Max HP: {_fmt(hp)}  |  Regen: {_fmt(regen, ' HP/s')}")
+        builder.lines.append(f"Max HP: {_fmt(hp)}  |  Regen: {_fmt(regen, ' HP/s')}")
+
+    # Delays on one line
     delays = []
     if downed is not None:
         delays.append(f"Downed Delay: {_fmt(downed, 's', 1)}")
     if damaged is not None:
         delays.append(f"Damaged Delay: {_fmt(damaged, 's', 1)}")
     if delays:
-        lines.append("  |  ".join(delays))
+        builder.lines.append("  |  ".join(delays))
 
+    # Resistances
     phys_resist = _resist_pct(0)
     energy_resist = _resist_pct(1)
     if phys_resist or energy_resist:
@@ -156,21 +111,21 @@ def enhancements_shield(root: ET.Element) -> str:
             parts.append(f"Phys: {phys_resist}")
         if energy_resist:
             parts.append(f"Energy: {energy_resist}")
-        lines.append("Resist:  " + "  |  ".join(parts))
+        builder.lines.append("Resist:  " + "  |  ".join(parts))
 
+    # Signatures
     if em_sig is not None or ir_sig is not None:
         parts = []
         if em_sig is not None:
             parts.append(f"EM: {_fmt(em_sig)}")
         if ir_sig is not None:
             parts.append(f"IR: {_fmt(ir_sig)}")
-        lines.append("Signatures:  " + "  |  ".join(parts))
+        builder.lines.append("Signatures:  " + "  |  ".join(parts))
 
-    if pwr is not None:
-        lines.append(f"Power Draw: {_fmt(pwr, ' PU/s')}")
-    if comp_hp is not None:
-        lines.append(f"Component HP: {_fmt(comp_hp)}")
-    return "\\n".join(lines)
+    builder.add("Power Draw", pwr, " PU/s")
+    builder.add("Component HP", comp_hp)
+
+    return builder.build()
 
 
 _DAMAGE_TYPES = (
@@ -206,11 +161,7 @@ def _ammo_damage_breakdown(ammo_root: ET.Element) -> tuple[float, dict]:
                     pass
     else:
         for info in ammo_root.iter("DamageInfo"):
-            parent_tags = set()
-            node = info
-            while node is not None:
-                parent_tags.add(node.tag)
-                node = None
+            # ElementTree doesn't support parent traversal - just use first DamageInfo
             for attr in _DAMAGE_TYPES:
                 try:
                     v = float(info.get(attr, 0))
@@ -519,7 +470,7 @@ def enhancements_mission(root: ET.Element, reputation_lookup: dict[str, int] | N
 
     try:
         loc_key = _mission_loc_key(root)
-        engagement = _classify_mission_engagement(loc_key)
+        engagement = _classify_mission_engagement(loc_key or "")
         lines.append(f"<EM4>Engagement Type:</EM4> {engagement}")
 
         flags = _extract_mission_flags(root)
@@ -695,7 +646,7 @@ def enhancements_weapon(
         if regen_cost:
             parts.append(f"Cost/Shot: {_fmt(regen_cost)}")
         lines.append("  |  ".join(parts))
-    if proj_speed is not None:
+    if proj_speed is not None and proj_lifetime is not None:
         try:
             speed_f = float(proj_speed)
             lifetime_f = float(proj_lifetime)

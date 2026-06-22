@@ -27,6 +27,11 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from src.utils import enhancement_formatters as _enh_formatters
+from src.utils.dataforge_xml import attr as _attr
+from src.utils.dataforge_xml import find as _find
+from src.utils.dataforge_xml import poly_type as _poly_type
+from src.utils.formatting import NULL_UUID
+from src.utils.formatting import fmt as _fmt
 
 logger = logging.getLogger(__name__)
 
@@ -266,44 +271,6 @@ def append_enhancements(existing_value: str, enhancements_block: str, separator:
 
 # ── Stat formatters ───────────────────────────────────────────────────────────
 
-_OVERHEAT_PLACEHOLDER = 450_000  # Items with this overheat temp have no real overheat stat
-
-
-def _fmt(value, unit="", decimals=0) -> str:
-    if value is None:
-        return "?"
-    try:
-        v = float(value)
-        if decimals:
-            return f"{v:,.{decimals}f}{unit}"
-        return f"{int(round(v)):,}{unit}"
-    except (TypeError, ValueError):
-        return str(value)
-
-
-# ── XML parsing helpers ───────────────────────────────────────────────────────
-
-
-def _find(root: ET.Element, tag: str) -> ET.Element | None:
-    """Find first element with the given tag anywhere in the tree."""
-    return root.find(f".//{tag}")
-
-
-def _find_by_type(root: ET.Element, type_name: str) -> ET.Element | None:
-    """Find first element matching *type_name* by either ``__type`` attribute
-    (old DataForge format) or element tag (newer unforge builds emit the type
-    as the tag itself and drop ``__type``)."""
-    for el in root.iter():
-        if el.get("__type") == type_name or el.tag == type_name:
-            return el
-    return None
-
-
-def _attr(root: ET.Element, tag: str, attr: str, default=None):
-    el = _find(root, tag)
-    return el.get(attr, default) if el is not None else default
-
-
 # CIG system-sentinel loc keys. When a ContractStringParam or entity
 # Localization reference points at one of these, the game resolves it at
 # runtime to a literal placeholder string (``<= UNINITIALIZED =>`` etc.)
@@ -541,37 +508,6 @@ def _classify_mission_engagement(loc_key: str | None) -> str:
     return "FPS & Ship" if has_transport else "FPS"
 
 
-def _resource_amount(amount_el: ET.Element) -> str | None:
-    """Extract the numeric value from a resourceAmountPerSecond element."""
-    unit = amount_el.find(".//SPowerSegmentResourceUnit")
-    if unit is not None:
-        return unit.get("units")
-    std = amount_el.find(".//SStandardResourceUnit")
-    if std is not None:
-        return std.get("standardResourceUnits")
-    micro = amount_el.find(".//SMicroResourceUnit")
-    if micro is not None:
-        return micro.get("microResourceUnits")
-    return None
-
-
-def _find_resource(root: ET.Element, resource: str) -> str | None:
-    """
-    Find the amount/s for a given resource anywhere in the resource network,
-    searching both Generation and Conversion delta types.
-
-    For Conversion deltas, checks both <consumption> and <generation> children.
-    """
-    for delta_type in ("ItemResourceDeltaGeneration", "ItemResourceDeltaConversion", "ItemResourceDeltaConsumption"):
-        for delta in root.iter(delta_type):
-            for child in delta:
-                if child.get("resource") == resource:
-                    val = _resource_amount(child)
-                    if val is not None:
-                        return val
-    return None
-
-
 def _fire_rate(root: ET.Element) -> str | None:
     """Return the primary fire rate found in weapon fire actions.
 
@@ -696,12 +632,7 @@ def _ammo_damage_breakdown(ammo_root: ET.Element) -> tuple[float, dict]:
     else:
         # Fallback: look for DamageInfo that's NOT inside damageDropParams
         for info in ammo_root.iter("DamageInfo"):
-            # Skip DamageInfo elements inside damageDropParams
-            parent_tags = set()
-            node = info
-            while node is not None:
-                parent_tags.add(node.tag)
-                node = None  # ElementTree doesn't support parent traversal easily
+            # ElementTree doesn't support parent traversal - just use first DamageInfo
             for attr in _DAMAGE_TYPES:
                 try:
                     v = float(info.get(attr, 0))
@@ -915,11 +846,10 @@ def _extract_mission_flags(root: ET.Element) -> list[str]:
 
     Returns list of flag strings like 'Chain', 'Starter', 'Unique'.
     """
-    null_uuid = "00000000-0000-0000-0000-000000000000"
     flags = []
 
-    linked = root.get("linkedMission", null_uuid)
-    if linked != null_uuid:
+    linked = root.get("linkedMission", NULL_UUID)
+    if linked != NULL_UUID:
         flags.append("Chain")
 
     if root.get("tutorial") == "1":
@@ -1197,7 +1127,7 @@ def scan_contract_generators(
     """Scan contract generator XMLs for mission variants with different systems.
 
     Returns tuple of:
-        - missions: dict mapping title_key → [(system_name, success_xp, failure_xp, desc_key, flags, num_enemies, num_not_enemies), ...]
+        - missions: dict mapping title_key → [(system_name, success_xp, failure_xp, desc_key, flags, num_enemies, num_not_enemies, difficulty, has_bp, bp_chance, bp_variant), ...]
         - mission_blueprints: dict title_key → dict system_name → dict pool_label → list of craftable item display names.
           The pool_label dimension preserves rank-tier sub-grouping derived from the
           pool filename (e.g. Rank 0–1 / Rank 2–3 / Rank 4 from Shubin progression
@@ -1217,8 +1147,8 @@ def scan_contract_generators(
     blueprint_pools = blueprint_pools or {}
     entity_names = entity_names or {}
     pool_names = pool_names or {}
-    # Variant tuple: (system_name, success_xp, failure_xp, desc_key, flags, num_enemies, num_not_enemies)
-    missions: dict[str, list[tuple[str, int, int, str, list[str], int, int]]] = {}
+    # Variant tuple: (system_name, success_xp, failure_xp, desc_key, flags, num_enemies, num_not_enemies, difficulty, has_bp, bp_chance, bp_variant)
+    missions: dict[str, list[tuple[str, int, int, str, list[str], int, int, str, bool, float, str]]] = {}
     # Per-system, per-pool-label item lists. The extra label dimension keeps
     # items from different rank-tier pools separate inside one system so the
     # renderer can label each tier (e.g. "[Stanton, Rank 0-1]").
@@ -1374,8 +1304,7 @@ def scan_contract_generators(
                             contract_bp_variant = contract.get("debugName", "")
                             for bp_elem in contract.iter("BlueprintRewards"):
                                 pool_uuid = bp_elem.get("blueprintPool", "")
-                                null_uuid = "00000000-0000-0000-0000-000000000000"
-                                if pool_uuid and pool_uuid != null_uuid and pool_uuid in blueprint_pools:
+                                if pool_uuid and pool_uuid != NULL_UUID and pool_uuid in blueprint_pools:
                                     contract_has_bp = True
                                     pool_items = blueprint_pools[pool_uuid]
                                     # Derive the rank-tier label from the pool's
@@ -1400,18 +1329,17 @@ def scan_contract_generators(
                                         mission_bp_chance[title_key] = contract_bp_chance
 
                             # Extract item rewards
-                            null_uuid = "00000000-0000-0000-0000-000000000000"
                             if entity_names:
                                 item_names = []
                                 for item_elem in contract.findall(".//ContractResult_Item"):
                                     ec = item_elem.get("entityClass", "")
-                                    if ec and ec != null_uuid and ec in entity_names:
+                                    if ec and ec != NULL_UUID and ec in entity_names:
                                         name = entity_names[ec]
                                         if name not in item_names:
                                             item_names.append(name)
                                 for weighted_elem in contract.findall(".//ItemAwardEntityClass"):
                                     ec = weighted_elem.get("entityClass", "")
-                                    if ec and ec != null_uuid and ec in entity_names:
+                                    if ec and ec != NULL_UUID and ec in entity_names:
                                         name = entity_names[ec]
                                         if name not in item_names:
                                             item_names.append(name)
@@ -1459,7 +1387,6 @@ def scan_contract_generators(
                             # Extract per-contract flags (starter = no minStanding requirement)
                             contract_flags = list(handler_flags)  # inherit handler flags
                             contract.get("minStanding", "")
-                            null_uuid = "00000000-0000-0000-0000-000000000000"
                             # A contract with no standing requirement at handler intro level is a starter
                             # (detected by debugName containing "Intro" or being first in a career chain)
                             contract_debug = contract.get("debugName", "")
@@ -1525,21 +1452,6 @@ def _resolve_resource_uuids(bp_dir: Path) -> set[str]:
         except ET.ParseError:
             pass
     return uuids
-
-
-def _poly_type(elem: ET.Element) -> str:
-    """Return the effective polymorphic type of a DataForge element.
-
-    Historically CIG/unforge emitted elements like
-    ``<CraftingProcess_Base __polymorphicType="CraftingProcess_Creation" ... />``
-    and the generator filtered on the attribute. Newer unforge builds drop
-    ``__type``/``__polymorphicType`` entirely and emit the concrete type as
-    the element tag itself
-    (``<CraftingProcess_Creation ... />``), which silently zeros out every
-    attribute-based filter. Returning ``__polymorphicType or elem.tag`` makes
-    every call site compatible with both formats without branching.
-    """
-    return elem.get("__polymorphicType") or elem.tag
 
 
 def _normalize_commodity_name(raw: str) -> str:
@@ -1670,18 +1582,19 @@ def scan_crafting_blueprints(
     carryables_dir: Path,
     entity_names: dict[str, str],
     loc: dict[str, str],
-) -> dict[str, str]:
+) -> tuple[dict[str, str], dict[str, str]]:
     """Scan crafting blueprints and produce commodity_crafting_stats entries.
 
-    Returns a dict of localization key → augmented value for commodity names and
-    descriptions that are used as crafting materials.
+    Returns tuple of:
+        - out: dict of commodity localization key → augmented value
+        - out_journal: dict of journal localization key → augmented value
     """
     import os
     from collections import defaultdict
 
     if not bp_dir.exists():
         logger.info("No crafting blueprints directory found")
-        return {}
+        return {}, {}
 
     # Step 1: Collect resource UUIDs from blueprints
     resource_uuids = _resolve_resource_uuids(bp_dir)
@@ -2141,7 +2054,6 @@ def build_scitem_lookups(
     if not scitem_dir.exists():
         return mag_lookup, entity_names, entity_names_by_filename, entity_name_tags
 
-    null_uuid = "00000000-0000-0000-0000-000000000000"
     for xml_file in scitem_dir.rglob("*.xml"):
         try:
             root = ET.parse(xml_file).getroot()
@@ -2160,7 +2072,7 @@ def build_scitem_lookups(
             if not found_mag and _poly_type(elem) == "SAmmoContainerComponentParams":
                 ammo_ref = elem.get("ammoParamsRecord", "")
                 max_ammo = elem.get("maxAmmoCount", "")
-                if ammo_ref and ammo_ref != null_uuid:
+                if ammo_ref and ammo_ref != NULL_UUID:
                     mag_lookup[entity_name] = (ammo_ref, max_ammo)
                 found_mag = True
             if not found_name:
@@ -3013,10 +2925,10 @@ def main(
                             bp_body_parts.append("\\n".join(f"- {name}" for name in items))
                     else:
                         # Multiple regional or rank pools — one sub-section each,
-                        # sorted by keys for stable output.
-                        for fp, keys in sorted(unique_fps.items(), key=lambda kv: sorted(kv[1])):
-                            systems = sorted({s for s, _ in keys})
-                            labels = sorted({lbl for _, lbl in keys if lbl})
+                        # sorted by region_keys for stable output.
+                        for fp, region_keys in sorted(unique_fps.items(), key=lambda kv: sorted(kv[1])):
+                            systems = sorted({s for s, _ in region_keys})
+                            labels = sorted({lbl for _, lbl in region_keys if lbl})
                             sys_str = ", ".join(systems)
                             header = f"{sys_str}, {', '.join(labels)}" if labels else sys_str
                             region_list = "\\n".join(f"- {name}" for name in fp)
