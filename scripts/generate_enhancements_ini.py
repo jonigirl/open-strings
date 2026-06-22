@@ -1504,26 +1504,39 @@ def _discover_commodity_loc_pairs(internal_name: str, loc: dict[str, str]) -> li
     accepted. Returning every matching variant means a refined and a raw form
     both get the [CF] tag + BLUEPRINT DATA block.
     """
-    prefix = f"items_commodities_{internal_name.lower()}"
-    name_keys: list[str] = []
-    desc_by_base: dict[str, str] = {}  # lowercase name stem -> actual desc key
-
-    for key in loc:
-        klow = key.lower()
-        if not klow.startswith(prefix):
-            continue
-        if klow.endswith("_desc"):
-            desc_by_base[klow[:-5]] = key
-        elif klow.endswith("_des"):
-            desc_by_base.setdefault(klow[:-4], key)
-        else:
-            name_keys.append(key)
+    # CIG loc data has occasional commodity spelling drift. Keep known aliases
+    # here so blueprint-derived stems still map to their loc keys.
+    loc_stems = [internal_name.lower()]
+    loc_aliases: dict[str, tuple[str, ...]] = {
+        "quantanium": ("quantainium",),
+    }
+    loc_stems.extend(loc_aliases.get(loc_stems[0], ()))
 
     pairs: list[tuple[str, str]] = []
-    for name_key in name_keys:
-        desc_key = desc_by_base.get(name_key.lower())
-        if desc_key:
-            pairs.append((name_key, desc_key))
+    for stem in loc_stems:
+        prefix = f"items_commodities_{stem}"
+        name_keys: list[str] = []
+        desc_by_base: dict[str, str] = {}  # lowercase name stem -> actual desc key
+
+        for key in loc:
+            klow = key.lower()
+            if not klow.startswith(prefix):
+                continue
+            if klow.endswith("_desc"):
+                desc_by_base[klow[:-5]] = key
+            elif klow.endswith("_des"):
+                desc_by_base.setdefault(klow[:-4], key)
+            else:
+                name_keys.append(key)
+
+        for name_key in name_keys:
+            desc_key = desc_by_base.get(name_key.lower())
+            if desc_key:
+                pairs.append((name_key, desc_key))
+
+        if pairs:
+            return pairs
+
     return pairs
 
 
