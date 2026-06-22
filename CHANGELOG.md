@@ -5,17 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.4.0] - 2026-06-22
+## [1.4.1] - 2026-06-22
+
+### Changed
+
+- Enhancement generator pipeline refactored: extracted shared utilities, decomposed
+  main() into testable EnhancementPipeline class, added StatLineBuilder for DRY
+  formatting, full mypy strict type safety compliance
+
+## [1.4.0] - 2026-06-17
 
 ### Fixed
 
 - Restoring a backup no longer crashes — the reload after restore now correctly
   uses the async loading path instead of a stale direct API call
 - Startup freshness checks (DataForge, enhancements) no longer raise AttributeError
-  when a background worker is active — worker state is now read from the correct
-  coordinator object after the Phase 3 refactor
 
-### Changed
+  # Changed
 
 - Internal architecture: extracted AppConstants, ApplyEngine, CategoryClassifier,
   FileUtils, PreviewRenderer, StartupFlowManager, and ResourceUtils into dedicated
