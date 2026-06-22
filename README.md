@@ -14,6 +14,12 @@ Open Strings is a fork of [Smart Citizen by Osiris DevWorks](https://github.com/
 - **Auto-generated enhancements** — stat overlays for ships, components, weapons, missions, journal entries, and commodity crafting; togglable per category.
 - **Safe apply** — timestamped backups before every write, automatic rollback on validation mismatch, up to 5 backups per channel.
 
+## Download & Installation
+
+**Important:** Current releases are **not code-signed**. Windows Defender SmartScreen will show a warning on first launch. This is expected — Open Strings is a hobby project and code-signing certificates cost money. You can safely bypass the warning by clicking "More info" → "Run anyway" if you trust the source.
+
+A trusted code-signing certificate is planned for future releases.
+
 ## Install (from source)
 
 Requires Python 3.12+, [UV](https://docs.astral.sh/uv/getting-started/installation/), and Windows 10/11.
