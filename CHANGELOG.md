@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.4.0] - 2026-06-17
+## [1.4.0] - 2026-06-22
 
 ### Fixed
 
@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Internal architecture: extracted AppConstants, ApplyEngine, CategoryClassifier,
   FileUtils, PreviewRenderer, StartupFlowManager, and ResourceUtils into dedicated
   modules for maintainability
+- Enhancement generator pipeline refactored: extracted shared utilities, decomposed
+  main() into testable EnhancementPipeline class, added StatLineBuilder for DRY
+  formatting, full mypy strict type safety compliance
 - Test coverage floor raised to 83%
 - Build scripts now support signing with a trusted code-signing certificate
   (`build_all.bat --sign`); self-signed builds automatically clean up after themselves
