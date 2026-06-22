@@ -3,6 +3,7 @@
 import datetime
 import email.utils
 import logging
+import ssl
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -40,7 +41,7 @@ def download_file(url: str, output_path: str | Path) -> Path:
     try:
         logger.info(f"Downloading from {url}")
 
-        with urlopen(url, timeout=60) as response:
+        with urlopen(url, timeout=60, context=ssl.create_default_context()) as response:
             chunks = []
             chunk_size = 65536  # 64KB chunks
             total = 0
@@ -100,7 +101,7 @@ def download_file_if_changed(url: str, output_path: str | Path) -> bool:
 
     req = Request(url, headers=headers)
     try:
-        with urlopen(req, timeout=60) as response:
+        with urlopen(req, timeout=60, context=ssl.create_default_context()) as response:
             chunks: list[bytes] = []
             total = 0
             while True:

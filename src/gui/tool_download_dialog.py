@@ -119,8 +119,9 @@ class ToolDownloadDialog(QDialog):
             self,
             "Download Failed",
             f"Could not download tools:\n\n{message}\n\n"
-            "Check your internet connection and try again.\n\n"
+            "This is usually caused by a network issue, firewall, or antivirus\n"
+            "blocking the download. Check your internet connection and try again.\n\n"
             "Alternatively, download unp4k and unforge manually from:\n"
             "https://github.com/dolkensp/unp4k/releases\n\n"
-            f"Place unp4k.exe and unforge.exe (and their supporting files) in:\n{tools_dir}",
+            f"Place unp4k.exe and unforge.cli.exe (and their supporting files) in:\n{tools_dir}",
         )

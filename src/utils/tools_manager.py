@@ -1,6 +1,7 @@
 """Manages the download and local caching of unp4k / unforge extraction tools."""
 
 import logging
+import ssl
 import tempfile
 import threading
 import urllib.request
@@ -81,7 +82,7 @@ def download_tools(
         try:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp_file:
                 tmp_path = Path(tmp_file.name)
-                with urllib.request.urlopen(url, timeout=60) as response:
+                with urllib.request.urlopen(url, timeout=60, context=ssl.create_default_context()) as response:
                     total = int(response.headers.get("Content-Length") or 0)
                     downloaded = 0
                     while True:
