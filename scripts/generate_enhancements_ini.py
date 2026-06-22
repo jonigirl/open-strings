@@ -314,6 +314,7 @@ def _is_sentinel_loc_ref(ref: str) -> bool:
 _PLACEHOLDER_TEXTS = frozenset(
     {
         "<= PLACEHOLDER =>",
+        "<Place Holder>",
         "<= UNINITIALIZED =>",
         "<= BADSTRING =>",
         "<= BADTOKEN =>",
@@ -327,6 +328,52 @@ _PLACEHOLDER_TEXTS = frozenset(
 
 def _is_placeholder_text(s: str) -> bool:
     return s.strip() in _PLACEHOLDER_TEXTS
+
+
+_MISSION_REP_FALLBACK_LABEL = "Unknown Reputation Track (Upstream Placeholder)"
+_MISSION_REP_PLACEHOLDER_HITS: dict[str, int] = {}
+
+
+def _looks_like_placeholder_label(value: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", "", value.lower())
+    return normalized in {
+        "placeholder",
+        "uninitialized",
+        "badstring",
+        "badtoken",
+        "debug",
+        "empty",
+        "invalid",
+        "noinnerthought",
+    }
+
+
+def _record_mission_reputation_placeholder(raw_scope: str, mission_key: str | None) -> None:
+    previous = _MISSION_REP_PLACEHOLDER_HITS.get(raw_scope, 0)
+    _MISSION_REP_PLACEHOLDER_HITS[raw_scope] = previous + 1
+    if previous == 0:
+        logger.warning(
+            f"Mission reputation placeholder detected: scope={raw_scope!r}, "
+            f"mission={mission_key or '<unknown>'!r}; using fallback label {_MISSION_REP_FALLBACK_LABEL!r}"
+        )
+
+
+def _extract_mission_reputation_track(root: ET.Element) -> str | None:
+    rep_lists = root.findall(".//missionResultReputationRewards/SReputationAmountListParams")
+    if not rep_lists:
+        return None
+    rep_amounts = rep_lists[0].findall(".//SReputationAmountParams")
+    if not rep_amounts:
+        return None
+    scope = (rep_amounts[0].get("reputationScope") or "").strip()
+    if not scope:
+        return None
+
+    if _is_sentinel_loc_ref(scope) or _is_placeholder_text(scope) or _looks_like_placeholder_label(scope):
+        _record_mission_reputation_placeholder(scope, _mission_loc_key(root))
+        return _MISSION_REP_FALLBACK_LABEL
+
+    return scope.lstrip("@")
 
 
 def _loc_key(root: ET.Element) -> str | None:
@@ -1725,6 +1772,7 @@ _enh_formatters._classify_mission_engagement = _classify_mission_engagement
 _enh_formatters._extract_mission_flags = _extract_mission_flags
 _enh_formatters._extract_difficulty = _extract_difficulty
 _enh_formatters._extract_mission_xp = _extract_mission_xp
+_enh_formatters._extract_mission_reputation_track = _extract_mission_reputation_track
 _enh_formatters._extract_spawn_counts = _extract_spawn_counts
 _enh_formatters._extract_turret_info = _extract_turret_info
 _enh_formatters._fire_rate = _fire_rate
@@ -2653,6 +2701,7 @@ def main(
         # augmentation → coverage report. Kept in one thread — each step
         # consumes the prior step's in-memory result.
         out: dict[str, str] = {}
+        _MISSION_REP_PLACEHOLDER_HITS.clear()
         pu_missions_dir = records / "missionbroker" / "pu_missions"
         if pu_missions_dir.exists():
             logger.info(f"Processing {pu_missions_dir.name}…")
@@ -2687,6 +2736,16 @@ def main(
                 )
 
         logger.info(f"Finished missions scan ({len(out)} entries)")
+        if _MISSION_REP_PLACEHOLDER_HITS:
+            total_replaced = sum(_MISSION_REP_PLACEHOLDER_HITS.values())
+            examples = ", ".join(
+                f"{scope!r} x{count}" for scope, count in list(_MISSION_REP_PLACEHOLDER_HITS.items())[:3]
+            )
+            logger.info(
+                "Mission reputation placeholders replaced: "
+                f"{total_replaced} across {len(_MISSION_REP_PLACEHOLDER_HITS)} scope values"
+                + (f" ({examples})" if examples else "")
+            )
         _tick("Scanned missions")
 
         # Blueprint pool lookup (needs entity_names from Group A).

@@ -34,6 +34,10 @@ def _extract_mission_xp(root: ET.Element, reputation_lookup: dict[str, int] | No
     return 0
 
 
+def _extract_mission_reputation_track(root: ET.Element) -> str | None:
+    return None
+
+
 def _extract_spawn_counts(element: ET.Element) -> tuple[int, int, int]:
     return (0, 0, 0)
 
@@ -475,6 +479,10 @@ def enhancements_mission(root: ET.Element, reputation_lookup: dict[str, int] | N
 
         flags = _extract_mission_flags(root)
         lines.append(f"<EM4>Mission Type:</EM4> {', '.join(flags) if flags else 'Standard'}")
+
+        reputation_track = _extract_mission_reputation_track(root)
+        if reputation_track:
+            lines.append(f"<EM4>Reputation Track:</EM4> {reputation_track}")
 
         difficulty = _extract_difficulty(root)
         if difficulty:

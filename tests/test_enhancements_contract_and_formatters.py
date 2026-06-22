@@ -344,6 +344,23 @@ def test_mission_formatter_outputs_core_blocks(gen_module):
     assert "Turrets:" in out
 
 
+def test_mission_formatter_reputation_track_uses_placeholder_fallback(gen_module):
+    root = _xml(
+        """
+        <MissionBrokerEntry description="@SomeMissionDesc">
+          <missionResultReputationRewards>
+            <SReputationAmountListParams>
+              <SReputationAmountParams reputationScope="&lt;Place Holder&gt;" reward="rep_reward_1" />
+            </SReputationAmountListParams>
+          </missionResultReputationRewards>
+        </MissionBrokerEntry>
+        """
+    )
+    out = gen_module.enhancements_mission(root, {"rep_reward_1": 100})
+    assert "Reputation Track:" in out
+    assert "Unknown Reputation Track (Upstream Placeholder)" in out
+
+
 def test_weapon_formatter_outputs_damage_and_range(gen_module):
     weapon_root = _xml(
         """
