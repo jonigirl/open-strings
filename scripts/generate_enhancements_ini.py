@@ -26,6 +26,8 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from src.utils import enhancement_formatters as _enh_formatters
+
 logger = logging.getLogger(__name__)
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
@@ -71,6 +73,25 @@ DEFAULT_BASE_INI = APP_CACHE_DIR / "base.ini"
 DEFAULT_FORGE_DIR = APP_CACHE_DIR / "dataforge"
 
 OUTPUT_DIR = APP_CACHE_DIR
+
+
+# Canonical enhancement output mapping for this generator. This keeps
+# job/write wiring centralized so adding a new enhancement key requires
+# one mapping update instead of multiple hand-edited blocks.
+ENHANCEMENT_OUTPUT_FILES: dict[str, str] = {
+    "ship_descs": "ships_desc_enhancements.ini",
+    "component_descs": "components_desc_enhancements.ini",
+    "ship_weapon_descs": "ship_weapons_desc_enhancements.ini",
+    "fps_weapon_descs": "fps_weapons_desc_enhancements.ini",
+    "fps_attachment_descs": "fps_attachments_enhancements.ini",
+    "ship_fuel_descs": "ship_fuel_enhancements.ini",
+    "countermeasure_descs": "countermeasure_enhancements.ini",
+    "lifesupport_descs": "lifesupport_enhancements.ini",
+    "mission_rewards": "mission_rewards_enhancements.ini",
+    "commodity_crafting": "commodity_crafting_enhancements.ini",
+    "journal": "journal_enhancements.ini",
+    "missile_enhancements": "missile_enhancements.ini",
+}
 
 
 # ── INI helpers ───────────────────────────────────────────────────────────────
@@ -696,553 +717,6 @@ def _ammo_damage_breakdown(ammo_root: ET.Element) -> tuple[float, dict]:
 # ── Per-type stat generators ──────────────────────────────────────────────────
 
 
-def enhancements_shield(root: ET.Element) -> str:
-    el = _find(root, "SCItemShieldGeneratorParams")
-    if el is None:
-        return ""
-    hp = el.get("MaxShieldHealth")
-    regen = el.get("MaxShieldRegen")
-    downed = el.get("DownedRegenDelay")
-    damaged = el.get("DamagedRegenDelay")
-    pwr = _find_resource(root, "Power")
-    comp_hp = _attr(root, "SHealthComponentParams", "Health")
-    em_sig = _attr(root, "EMSignature", "nominalSignature")
-    ir_sig = _attr(root, "IRSignature", "nominalSignature")
-
-    # ShieldResistance is a 6-entry array under SCItemShieldGeneratorParams.
-    # Order is inferred from the standard SC damage-type ordering used elsewhere
-    # in the codebase (Phys, Energy, Distortion, Thermal, Bio, Stun) — index 0
-    # consistently shows mild positive resistance (~0–25%) and index 1 shows
-    # negative values (vulnerability), which matches SC's "energy shreds
-    # shields, physical penetrates partially" mechanic. Each entry has Max/Min
-    # spanning the power-allocation range (no power → full power). We expose
-    # the two players actually engage with: physical and energy.
-    resist_entries = list(el.findall("ShieldResistance/SShieldResistance"))
-
-    def _resist_pct(idx: int) -> str | None:
-        if idx >= len(resist_entries):
-            return None
-        e = resist_entries[idx]
-        try:
-            mn = float(e.get("Min", "0")) * 100
-            mx = float(e.get("Max", "0")) * 100
-        except (TypeError, ValueError):
-            return None
-        if mn == 0 and mx == 0:
-            return None
-        # Lower bound first for readability ("−77% – −26%" reads top-down).
-        lo, hi = (mn, mx) if mn <= mx else (mx, mn)
-        return f"{lo:+.0f}% – {hi:+.0f}%"
-
-    lines = []
-    if hp is not None or regen is not None:
-        lines.append(f"Max HP: {_fmt(hp)}  |  Regen: {_fmt(regen, ' HP/s')}")
-    delays = []
-    if downed is not None:
-        delays.append(f"Downed Delay: {_fmt(downed, 's', 1)}")
-    if damaged is not None:
-        delays.append(f"Damaged Delay: {_fmt(damaged, 's', 1)}")
-    if delays:
-        lines.append("  |  ".join(delays))
-
-    phys_resist = _resist_pct(0)
-    energy_resist = _resist_pct(1)
-    if phys_resist or energy_resist:
-        parts = []
-        if phys_resist:
-            parts.append(f"Phys: {phys_resist}")
-        if energy_resist:
-            parts.append(f"Energy: {energy_resist}")
-        lines.append("Resist:  " + "  |  ".join(parts))
-
-    if em_sig is not None or ir_sig is not None:
-        parts = []
-        if em_sig is not None:
-            parts.append(f"EM: {_fmt(em_sig)}")
-        if ir_sig is not None:
-            parts.append(f"IR: {_fmt(ir_sig)}")
-        lines.append("Signatures:  " + "  |  ".join(parts))
-
-    if pwr is not None:
-        lines.append(f"Power Draw: {_fmt(pwr, ' PU/s')}")
-    if comp_hp is not None:
-        lines.append(f"Component HP: {_fmt(comp_hp)}")
-    return "\\n".join(lines)
-
-
-def enhancements_missile(root: ET.Element) -> str:
-    """Extract missile/rocket/bomb enhancements: velocity, guidance, seeker type, lock ranges, tracking range,
-    turn rate, detonation mode, proximity fuse range, G-force, acceleration, damage, blast radius,
-    effective range, EM/IR signature, and component HP."""
-    lines = []
-
-    try:
-        # Primary missile params container
-        for el in root.iter():
-            try:
-                # Missile velocity and lifetime
-                if "missile" in el.tag.lower() or "projectile" in el.tag.lower():
-                    velocity = el.get("speed") or el.get("velocity") or el.get("initialVelocity")
-                    if velocity and velocity != "0":
-                        try:
-                            vel_val = float(velocity)
-                            if vel_val > 0:
-                                lines.append(f"Velocity: {vel_val:,.0f} m/s")
-                        except (ValueError, TypeError):
-                            pass
-
-                    lifetime = el.get("lifetime") or el.get("maxLifetime") or el.get("burnTime")
-                    if lifetime and lifetime != "0":
-                        try:
-                            life_val = float(lifetime)
-                            if life_val > 0:
-                                lines.append(f"Lifetime: {life_val:.2f}s")
-                        except (ValueError, TypeError):
-                            pass
-
-                # Guidance and tracking parameters
-                if "guidance" in el.tag.lower() or "tracking" in el.tag.lower():
-                    guidance_type = (
-                        el.get("guidanceType")
-                        or el.get("type")
-                        or el.tag.replace("Guidance", "").replace("Tracking", "")
-                    )
-                    if guidance_type and "none" not in guidance_type.lower():
-                        lines.append(f"Guidance: {guidance_type}")
-
-                    # Seeker type (passive vs active)
-                    seeker_type = el.get("seekerType") or el.get("seekerMode")
-                    if seeker_type and "none" not in seeker_type.lower():
-                        lines.append(f"Seeker: {seeker_type}")
-
-                    # Lock-on time (how long to acquire lock)
-                    lock_time = el.get("lockTime") or el.get("lockOnTime") or el.get("lockAcquisitionTime")
-                    if lock_time and lock_time != "0":
-                        try:
-                            time_val = float(lock_time)
-                            if time_val > 0:
-                                lines.append(f"Lock Time: {time_val:.2f}s")
-                        except (ValueError, TypeError):
-                            pass
-
-                    # Minimum lock range
-                    min_lock = el.get("minLockRange") or el.get("minimumLockRange")
-                    if min_lock and min_lock != "0":
-                        try:
-                            min_val = float(min_lock) / 1000  # Convert to km
-                            if min_val > 0:
-                                lines.append(f"Min Lock Range: {min_val:,.1f} km")
-                        except (ValueError, TypeError):
-                            pass
-
-                    # Maximum lock range
-                    max_lock = el.get("maxLockRange") or el.get("lockOnRange") or el.get("launchRange")
-                    if max_lock and max_lock != "0":
-                        try:
-                            max_val = float(max_lock) / 1000  # Convert to km
-                            if max_val > 0:
-                                lines.append(f"Max Lock Range: {max_val:,.1f} km")
-                        except (ValueError, TypeError):
-                            pass
-
-                    # Tracking range (how far missile can follow locked target)
-                    track_range = el.get("trackingRange") or el.get("engagementRange") or el.get("maxEngagementRange")
-                    if track_range and track_range != "0":
-                        try:
-                            track_val = float(track_range) / 1000  # Convert to km
-                            if track_val > 0:
-                                lines.append(f"Tracking Range: {track_val:,.1f} km")
-                        except (ValueError, TypeError):
-                            pass
-
-                    # Proximity fuse range (detonation distance from target)
-                    prox_range = el.get("proximityFuseRange") or el.get("detonationRange") or el.get("fuseRange")
-                    if prox_range and prox_range != "0":
-                        try:
-                            prox_val = float(prox_range)
-                            if prox_val > 0:
-                                lines.append(f"Proximity Range: {prox_val:,.0f} m")
-                        except (ValueError, TypeError):
-                            pass
-
-                    # Turn rate / Max G-force for guided missiles
-                    max_g = el.get("maxGForce") or el.get("maxAcceleration") or el.get("maxG")
-                    if max_g and max_g != "0":
-                        try:
-                            g_val = float(max_g)
-                            if g_val > 0:
-                                lines.append(f"Max G-Force: {g_val:.1f}G")
-                        except (ValueError, TypeError):
-                            pass
-
-                    turn_rate = el.get("turnRate") or el.get("maxTurnRate") or el.get("angularVelocity")
-                    if turn_rate and turn_rate != "0":
-                        try:
-                            turn_val = float(turn_rate)
-                            if turn_val > 0:
-                                lines.append(f"Turn Rate: {turn_val:.1f}°/s")
-                        except (ValueError, TypeError):
-                            pass
-
-                    # Detonation mode
-                    detonation = el.get("detonationMode") or el.get("fuseMode") or el.get("detonationType")
-                    if detonation and "none" not in detonation.lower():
-                        lines.append(f"Detonation: {detonation}")
-
-                # Acceleration / Thrust
-                if "propulsion" in el.tag.lower() or "thruster" in el.tag.lower() or "engine" in el.tag.lower():
-                    accel = el.get("acceleration") or el.get("maxAcceleration") or el.get("thrust")
-                    if accel and accel != "0":
-                        try:
-                            accel_val = float(accel)
-                            if accel_val > 0:
-                                lines.append(f"Acceleration: {accel_val:,.1f} m/s²")
-                        except (ValueError, TypeError):
-                            pass
-
-                # Fuel/propellant for rockets and missiles
-                if "propellant" in el.tag.lower() or "fuel" in el.tag.lower():
-                    fuel_amount = el.get("amount") or el.get("fuelAmount")
-                    if fuel_amount and fuel_amount != "0":
-                        try:
-                            fuel_val = float(fuel_amount)
-                            if fuel_val > 0:
-                                lines.append(f"Fuel: {fuel_val:.1f}s")
-                        except (ValueError, TypeError):
-                            pass
-            except Exception:
-                pass
-
-        # Lock range (min / max) — actual attribute names on <targetingParams>
-        # are `lockRangeMin` / `lockRangeMax` (in meters), not the speculative
-        # `minLockRange` / `maxLockRange` the loop above tries. Pull them
-        # directly so this stat actually shows up.
-        lock_min = _attr(root, "targetingParams", "lockRangeMin")
-        lock_max = _attr(root, "targetingParams", "lockRangeMax")
-        try:
-            lmn = float(lock_min) if lock_min else None
-        except (ValueError, TypeError):
-            lmn = None
-        try:
-            lmx = float(lock_max) if lock_max else None
-        except (ValueError, TypeError):
-            lmx = None
-
-        def _fmt_range_m(v: float) -> str:
-            return f"{v / 1000:,.1f} km" if v >= 1000 else f"{v:,.0f} m"
-
-        if lmn is not None and lmn > 0 and lmx is not None and lmx > 0:
-            lines.append(f"Lock Range: {_fmt_range_m(lmn)} – {_fmt_range_m(lmx)}")
-        elif lmn is not None and lmn > 0:
-            lines.append(f"Min Lock Range: {_fmt_range_m(lmn)}")
-        elif lmx is not None and lmx > 0:
-            lines.append(f"Max Lock Range: {_fmt_range_m(lmx)}")
-
-        # Arming — `armTime` (seconds before warhead arms) and
-        # `explosionSafetyDistance` (meters within which the missile won't
-        # detonate, near-launcher safety) live on <SCItemMissileParams>.
-        # Practical min arming distance ≈ armTime × cruise speed; surface
-        # both raw values plus the computed distance so players can compare
-        # missiles meaningfully.
-        arm_time = _attr(root, "SCItemMissileParams", "armTime")
-        safety_dist = _attr(root, "SCItemMissileParams", "explosionSafetyDistance")
-        cruise_speed = _attr(root, "GCSParams", "linearSpeed")
-
-        try:
-            arm_t = float(arm_time) if arm_time else None
-        except (ValueError, TypeError):
-            arm_t = None
-        try:
-            safety = float(safety_dist) if safety_dist else None
-        except (ValueError, TypeError):
-            safety = None
-        try:
-            speed = float(cruise_speed) if cruise_speed else None
-        except (ValueError, TypeError):
-            speed = None
-
-        arm_parts = []
-        if arm_t and arm_t > 0:
-            arm_parts.append(f"Arm Time: {arm_t:.1f}s")
-        if arm_t and arm_t > 0 and speed and speed > 0:
-            arm_dist = arm_t * speed
-            arm_parts.append(f"Arm Dist: {_fmt_range_m(arm_dist)}")
-        if safety and safety > 0:
-            arm_parts.append(f"Min Detonate: {safety:,.0f} m")
-        if arm_parts:
-            lines.append("  |  ".join(arm_parts))
-
-        # Damage (inherited from base weapon/ammo structure)
-        damage_info = _find(root, "DamageInfo")
-        if damage_info is not None:
-            total_dmg, breakdown = _ammo_damage_breakdown(root)
-            if total_dmg and total_dmg > 0:
-                type_str = ""
-                if breakdown and len(breakdown) == 1:
-                    type_str = f" ({list(breakdown.keys())[0]})"
-                elif breakdown and len(breakdown) > 1:
-                    type_str = " (" + " / ".join(f"{lbl}: {v:.1f}" for lbl, v in breakdown.items()) + ")"
-                lines.append(f"Damage: {_fmt(total_dmg, '', 1)}{type_str}")
-
-        # Blast radius (warhead explosion radius)
-        blast = _attr(root, "ExplosionParams", "maxRadius")
-        if not blast:
-            blast = _attr(root, "ExplosionParams", "minRadius")
-        if not blast:
-            blast = _attr(root, "Warhead", "blastRadius")
-        if not blast:
-            blast = _attr(root, "DamageInfo", "DamageDropOffEnd")
-        if blast:
-            try:
-                blast_val = float(blast)
-                if blast_val > 0:
-                    lines.append(f"Blast Radius: {blast_val:,.0f} m")
-            except (ValueError, TypeError):
-                pass
-
-        # Effective range (calculated or stored)
-        eff_range = _attr(root, "ProjectileParams", "effectiveRange")
-        if eff_range and eff_range != "0":
-            try:
-                eff_val = float(eff_range) / 1000  # Convert to km
-                if eff_val > 0:
-                    lines.append(f"Effective Range: {eff_val:,.1f} km")
-            except (ValueError, TypeError):
-                pass
-
-        # EM and IR signatures (how detectable the missile is)
-        em_sig = _attr(root, "EMSignature", "nominalSignature")
-        if em_sig and em_sig != "0":
-            try:
-                em_val = float(em_sig)
-                if em_val > 0:
-                    lines.append(f"EM Signature: {em_val:,.0f}")
-            except (ValueError, TypeError):
-                pass
-
-        ir_sig = _attr(root, "IRSignature", "nominalSignature")
-        if ir_sig and ir_sig != "0":
-            try:
-                ir_val = float(ir_sig)
-                if ir_val > 0:
-                    lines.append(f"IR Signature: {ir_val:,.0f}")
-            except (ValueError, TypeError):
-                pass
-
-        # Component HP
-        comp_hp = _attr(root, "SHealthComponentParams", "Health")
-        if comp_hp is not None:
-            lines.append(f"Component HP: {_fmt(comp_hp)}")
-    except Exception:
-        pass
-
-    return "\\n".join(lines) if lines else ""
-
-
-def enhancements_radar(root: ET.Element) -> str:
-    """Extract radar/sensor stats.
-
-    Detection range itself isn't stored as a flat value — the shared params
-    record (`radarsystem/vehicleradarsystemsharedparams.xml`) sets both
-    maxPassiveDistance and maxActiveDistance to 0 (unlimited) and leaves
-    actual range to a runtime sensitivity × signature × atmospheric
-    formula. We surface the per-radar values that ARE meaningful and
-    intuitive: aim-assist target acquisition range, ping cooldown, what
-    detection modes the radar permits, and the standard power/health pair.
-    Abstract sensitivity/piercing scalars are intentionally dropped — they
-    require knowing CIG's internal math to interpret.
-    """
-    lines = []
-
-    # Aim-assist auto-target acquisition range (meters). Varies per radar
-    # 585–3588m; useful proxy for "how far this radar can lock targets for
-    # gimbal aim assist" even though it's not pure detection range.
-    for el in root.iter("aimAssist"):
-        min_dist = el.get("distanceMinAssignment")
-        max_dist = el.get("distanceMaxAssignment")
-        try:
-            min_v = float(min_dist) if min_dist else None
-            max_v = float(max_dist) if max_dist else None
-        except (TypeError, ValueError):
-            min_v = max_v = None
-        if min_v is not None and max_v is not None and max_v > 0:
-            lines.append(f"Aim Assist Range: {min_v:,.0f}–{max_v:,.0f} m")
-        break
-
-    # Ping cooldown (seconds between active radar pings).
-    for el in root.iter("pingProperties"):
-        cd = el.get("cooldownTime")
-        if cd:
-            try:
-                cd_v = float(cd)
-                lines.append(f"Ping Cooldown: {cd_v:.1f}s")
-            except (TypeError, ValueError):
-                pass
-        break
-
-    # Passive/Active detection capability (which kinds of scanning the
-    # radar supports — orthogonal to range, but useful for stealth-vs-
-    # combat ship loadout decisions).
-    passive_capable = False
-    active_capable = False
-    for el in root.iter("SCItemRadarSignatureDetection"):
-        if el.get("permitPassiveDetection") == "1":
-            passive_capable = True
-        if el.get("permitActiveDetection") == "1":
-            active_capable = True
-
-    modes = []
-    if passive_capable:
-        modes.append("Passive")
-    if active_capable:
-        modes.append("Active")
-    if modes:
-        lines.append(f"Detection Mode: {' / '.join(modes)}")
-
-    # Power consumption.
-    pwr = _find_resource(root, "Power")
-    if pwr is not None:
-        lines.append(f"Power Draw: {_fmt(pwr, ' PU/s')}")
-
-    # Component health.
-    comp_hp = _attr(root, "SHealthComponentParams", "Health")
-    if comp_hp is not None:
-        lines.append(f"Component HP: {_fmt(comp_hp)}")
-
-    return "\\n".join(lines) if lines else ""
-
-    return "\\n".join(lines) if lines else ""
-
-
-def enhancements_cooler(root: ET.Element) -> str:
-    cooling = _find_resource(root, "Coolant")
-    pwr = _find_resource(root, "Power")
-    comp_hp = _attr(root, "SHealthComponentParams", "Health")
-    em_sig = _attr(root, "EMSignature", "nominalSignature")
-    ir_sig = _attr(root, "IRSignature", "nominalSignature")
-    overheat = _attr(root, "itemResourceParams", "overheatTemperature")
-
-    lines = []
-    if cooling is not None:
-        lines.append(f"Cooling Rate: {_fmt(cooling, ' CR/s')}")
-    if pwr is not None:
-        lines.append(f"Power Draw: {_fmt(pwr, ' PU/s')}")
-    if comp_hp is not None:
-        lines.append(f"Component HP: {_fmt(comp_hp)}")
-    if em_sig is not None or ir_sig is not None:
-        parts = []
-        if em_sig is not None:
-            parts.append(f"EM: {_fmt(em_sig)}")
-        if ir_sig is not None:
-            parts.append(f"IR: {_fmt(ir_sig)}")
-        lines.append("Signatures:  " + "  |  ".join(parts))
-    if overheat is not None:
-        try:
-            if float(overheat) < _OVERHEAT_PLACEHOLDER:
-                lines.append(f"Overheat Temp: {_fmt(overheat, 'K')}")
-        except (ValueError, TypeError):
-            lines.append(f"Overheat Temp: {_fmt(overheat, 'K')}")
-    return "\\n".join(lines)
-
-
-def enhancements_powerplant(root: ET.Element) -> str:
-    gen = _find_resource(root, "Power")
-    comp_hp = _attr(root, "SHealthComponentParams", "Health")
-    em_sig = _attr(root, "EMSignature", "nominalSignature")
-    ir_sig = _attr(root, "IRSignature", "nominalSignature")
-    overheat = _attr(root, "itemResourceParams", "overheatTemperature")
-    distort = _attr(root, "SDistortionParams", "Maximum")
-
-    lines = []
-    if gen is not None:
-        lines.append(f"Power Output: {_fmt(gen, ' PU/s')}")
-    if comp_hp is not None:
-        lines.append(f"Component HP: {_fmt(comp_hp)}")
-    if em_sig is not None or ir_sig is not None:
-        parts = []
-        if em_sig is not None:
-            parts.append(f"EM: {_fmt(em_sig)}")
-        if ir_sig is not None:
-            parts.append(f"IR: {_fmt(ir_sig)}")
-        lines.append("Signatures:  " + "  |  ".join(parts))
-    if overheat is not None:
-        try:
-            if float(overheat) < _OVERHEAT_PLACEHOLDER:
-                lines.append(f"Overheat Temp: {_fmt(overheat, 'K')}")
-        except (ValueError, TypeError):
-            lines.append(f"Overheat Temp: {_fmt(overheat, 'K')}")
-    if distort is not None:
-        lines.append(f"Max Distortion: {_fmt(distort)}")
-    return "\\n".join(lines)
-
-
-def enhancements_quantum_drive(root: ET.Element) -> str:
-    qd = _find(root, "SCItemQuantumDriveParams")
-    if qd is None:
-        return ""
-    fuel_req = qd.get("quantumFuelRequirement")
-
-    # SQuantumDriveParams is an inline struct: <params __type="SQuantumDriveParams" driveSpeed=... />
-    params = _find_by_type(root, "SQuantumDriveParams")
-    speed = params.get("driveSpeed") if params is not None else None
-    spool = params.get("spoolUpTime") if params is not None else None
-    cooldown = params.get("cooldownTime") if params is not None else None
-    cal_rate = params.get("calibrationRate") if params is not None else None
-    cal_min = params.get("minCalibrationRequirement") if params is not None else None
-    cal_max = params.get("maxCalibrationRequirement") if params is not None else None
-    accel1 = params.get("stageOneAccelRate") if params is not None else None
-    accel2 = params.get("stageTwoAccelRate") if params is not None else None
-
-    pwr = _find_resource(root, "Power")
-    qt_fuel = _find_resource(root, "QuantumFuel")
-    comp_hp = _attr(root, "SHealthComponentParams", "Health")
-    em_sig = _attr(root, "EMSignature", "nominalSignature")
-    ir_sig = _attr(root, "IRSignature", "nominalSignature")
-    overheat = _attr(root, "itemResourceParams", "overheatTemperature")
-    distort = _attr(root, "SDistortionParams", "Maximum")
-
-    lines = []
-    if speed is not None:
-        speed_mm = float(speed) / 1_000_000
-        spool_str = _fmt(spool, "s") if spool else "?"
-        lines.append(f"QT Speed: {speed_mm:,.0f} Mm/s  |  Spool: {spool_str}")
-    if cooldown is not None:
-        lines.append(f"Cooldown: {_fmt(cooldown, 's', 1)}")
-    if fuel_req is not None:
-        lines.append(f"Fuel/Gm: {float(fuel_req):.4f}")
-    if qt_fuel is not None:
-        lines.append(f"QT Fuel Use: {_fmt(qt_fuel)} μ/s")
-    if accel1 is not None or accel2 is not None:
-        parts = []
-        if accel1:
-            parts.append(f"S1: {_fmt(accel1)}")
-        if accel2:
-            parts.append(f"S2: {_fmt(accel2)}")
-        lines.append("Accel:  " + "  |  ".join(parts))
-    if cal_rate is not None:
-        lines.append(f"Cal Rate: {_fmt(cal_rate)}  |  Required: {_fmt(cal_min)}–{_fmt(cal_max)}")
-    if pwr is not None:
-        lines.append(f"Power Draw: {_fmt(pwr, ' PU/s')}")
-    if comp_hp is not None:
-        lines.append(f"Component HP: {_fmt(comp_hp)}")
-    if em_sig is not None or ir_sig is not None:
-        parts = []
-        if em_sig is not None:
-            parts.append(f"EM: {_fmt(em_sig)}")
-        if ir_sig is not None:
-            parts.append(f"IR: {_fmt(ir_sig)}")
-        lines.append("Signatures:  " + "  |  ".join(parts))
-    if overheat is not None:
-        try:
-            if float(overheat) < _OVERHEAT_PLACEHOLDER:
-                lines.append(f"Overheat Temp: {_fmt(overheat, 'K')}")
-        except (ValueError, TypeError):
-            lines.append(f"Overheat Temp: {_fmt(overheat, 'K')}")
-    if distort is not None:
-        lines.append(f"Max Distortion: {_fmt(distort)}")
-    return "\\n".join(lines)
-
-
 def _extract_mission_xp(root: ET.Element, reputation_lookup: dict[str, int] | None = None) -> int:
     """Extract mission success XP from primary reputation scope only.
 
@@ -1455,55 +929,6 @@ def _extract_mission_flags(root: ET.Element) -> list[str]:
         flags.append("Unique")
 
     return flags
-
-
-def enhancements_mission(root: ET.Element, reputation_lookup: dict[str, int] | None = None) -> str:
-    """Extract mission/contract reward stats (aUEC + Reputation XP) and flags.
-
-    Extracts:
-    - aUEC mission reward amount
-    - Reputation XP from reward UUID references using the reputation_lookup table
-    - Mission flags (Chain, Starter, Unique)
-    """
-    lines = []
-    reputation_lookup = reputation_lookup or {}
-
-    try:
-        # Engagement Type — prepended so players see loadout requirement first
-        loc_key = _mission_loc_key(root)
-        engagement = _classify_mission_engagement(loc_key)
-        lines.append(f"<EM4>Engagement Type:</EM4> {engagement}")
-
-        # Extract mission flags
-        flags = _extract_mission_flags(root)
-        lines.append(f"<EM4>Mission Type:</EM4> {', '.join(flags) if flags else 'Standard'}")
-
-        # Extract difficulty rating
-        difficulty = _extract_difficulty(root)
-        if difficulty:
-            lines.append(f"<EM4>Difficulty (1-7):</EM4> {difficulty}")
-
-        # Extract mission success XP (from first/success outcome only, not all outcomes)
-        total_rep_xp = _extract_mission_xp(root, reputation_lookup)
-        if total_rep_xp > 0:
-            lines.append(f"<EM4>Reputation XP:</EM4> +{total_rep_xp:,}")
-
-        # Extract spawn/wave counts
-        wave_groups, num_enemies, num_not_enemies = _extract_spawn_counts(root)
-        if num_enemies > 0:
-            lines.append(f"<EM4>Enemies:</EM4> {num_enemies}")
-        if num_not_enemies > 0:
-            lines.append(f"<EM4>Non-hostiles:</EM4> {num_not_enemies}")
-
-        # Turret presence — grouped with other hostile-entity tallies
-        turret_info = _extract_turret_info(root)
-        if turret_info:
-            lines.append(f"<EM4>Turrets:</EM4> {turret_info}")
-
-    except Exception:
-        pass
-
-    return "\\n".join(lines) if lines else ""
 
 
 def _name_from_blueprint_filename(bp_xml: Path) -> str:
@@ -2366,212 +1791,33 @@ def scan_crafting_blueprints(
     return out, out_journal
 
 
-def enhancements_weapon(
-    root: ET.Element,
-    ammo_lookup: dict[str, ET.Element],
-    loc: dict | None = None,
-    magazine_lookup: dict[str, tuple[str, str]] | None = None,
-) -> str:
-    """Ship or FPS weapon stats."""
-    fr = _fire_rate(root)
-    modes = _fire_modes(root, loc)
-    pwr = _find_resource(root, "Power")
+# Formatter extraction compatibility layer:
+# Keep legacy symbol names in this script for callers/tests, but route
+# implementation to src.utils.enhancement_formatters.
+_enh_formatters._mission_loc_key = _mission_loc_key
+_enh_formatters._classify_mission_engagement = _classify_mission_engagement
+_enh_formatters._extract_mission_flags = _extract_mission_flags
+_enh_formatters._extract_difficulty = _extract_difficulty
+_enh_formatters._extract_mission_xp = _extract_mission_xp
+_enh_formatters._extract_spawn_counts = _extract_spawn_counts
+_enh_formatters._extract_turret_info = _extract_turret_info
+_enh_formatters._fire_rate = _fire_rate
+_enh_formatters._fire_modes = _fire_modes
+_enh_formatters._poly_type = _poly_type
 
-    # Component health / signatures / heat
-    comp_hp = _attr(root, "SHealthComponentParams", "Health")
-    em_sig = _attr(root, "EMSignature", "nominalSignature")
-    ir_sig = _attr(root, "IRSignature", "nominalSignature")
-    overheat = _attr(root, "itemResourceParams", "overheatTemperature")
-
-    # Weight (mass from physics controller)
-    weight = None
-    for elem in root.iter():
-        pt = _poly_type(elem)
-        if "RigidPhysics" in pt or "StaticPhysics" in pt:
-            mass_val = elem.get("Mass")
-            if mass_val:
-                try:
-                    weight = float(mass_val)
-                except ValueError:
-                    pass
-            break
-
-    # Pellet count (shotguns fire multiple pellets per shot)
-    pellet_count = 1
-    for elem in root.iter():
-        if "SProjectileLauncher" in _poly_type(elem):
-            try:
-                pc = int(elem.get("pelletCount", "1"))
-                if pc > 1:
-                    pellet_count = pc
-            except ValueError:
-                pass
-            break
-
-    # Ammo damage — look up the ammo record by GUID
-    ammo_container = _find(root, "SAmmoContainerComponentParams")
-    ammo_record_id = ammo_container.get("ammoParamsRecord") if ammo_container is not None else None
-    capacity = None
-
-    # Fallback: for FPS weapons without inline ammo container, follow the magazine port chain
-    if not ammo_record_id or ammo_record_id == "00000000-0000-0000-0000-000000000000":
-        if magazine_lookup:
-            for elem in root.iter():
-                port_name = elem.get("itemPortName", "")
-                entity_class = elem.get("entityClassName", "")
-                if "magazine" in port_name.lower() and entity_class:
-                    mag_info = magazine_lookup.get(entity_class)
-                    if mag_info:
-                        ammo_record_id, mag_capacity = mag_info
-                        if mag_capacity:
-                            capacity = mag_capacity
-                    break
-
-    total_dmg = breakdown = proj_speed = proj_lifetime = None
-    dps = None
-    ammo_root = None
-    dmg_drop_min_dist = dmg_drop_per_m = dmg_drop_min = None
-    if ammo_record_id and ammo_record_id != "00000000-0000-0000-0000-000000000000":
-        ammo_root = ammo_lookup.get(ammo_record_id)
-        if ammo_root is not None:
-            total_dmg, breakdown = _ammo_damage_breakdown(ammo_root)
-            # Multiply by pellet count for shotguns
-            if pellet_count > 1 and total_dmg:
-                total_dmg *= pellet_count
-                breakdown = {k: v * pellet_count for k, v in breakdown.items()}
-            # Try multiple field names for projectile speed (varies by ammo type)
-            proj_speed = (
-                ammo_root.get("speed")
-                or ammo_root.get("velocity")
-                or ammo_root.get("projectileSpeed")
-                or ammo_root.get("initialSpeed")
-            )
-            # Try multiple field names for lifetime
-            proj_lifetime = (
-                ammo_root.get("lifetime") or ammo_root.get("projectileLifetime") or ammo_root.get("maxLifetime")
-            )
-            if total_dmg and fr:
-                try:
-                    dps = total_dmg * float(fr) / 60.0
-                except ValueError:
-                    pass
-
-            # Damage drop-off parameters
-            for elem in ammo_root.iter():
-                tag = elem.tag
-                if tag == "damageDropMinDistance":
-                    for d in elem:
-                        if _poly_type(d) == "DamageInfo" or "DamageInfo" in d.tag:
-                            try:
-                                dmg_drop_min_dist = float(d.get("DamagePhysical", 0)) + float(d.get("DamageEnergy", 0))
-                            except ValueError:
-                                pass
-                elif tag == "damageDropPerMeter":
-                    for d in elem:
-                        if _poly_type(d) == "DamageInfo" or "DamageInfo" in d.tag:
-                            try:
-                                dmg_drop_per_m = float(d.get("DamagePhysical", 0)) + float(d.get("DamageEnergy", 0))
-                            except ValueError:
-                                pass
-                elif tag == "damageDropMinDamage":
-                    for d in elem:
-                        if _poly_type(d) == "DamageInfo" or "DamageInfo" in d.tag:
-                            try:
-                                dmg_drop_min = float(d.get("DamagePhysical", 0)) + float(d.get("DamageEnergy", 0))
-                            except ValueError:
-                                pass
-
-    # Capacity: energy weapons use regen pool; ballistic use fixed container
-    regen = _find(root, "SWeaponRegenConsumerParams")
-    regen_rate = regen_cooldown = regen_cost = None
-    if regen is not None:
-        if not capacity:
-            capacity = regen.get("maxAmmoLoad")
-        regen_rate = regen.get("requestedRegenPerSec")
-        regen_cooldown = regen.get("regenerationCooldown")
-        regen_cost = regen.get("regenerationCostPerBullet")
-    elif ammo_container is not None and not capacity:
-        capacity = ammo_container.get("maxAmmoCount")
-
-    lines = []
-    if weight is not None and weight > 0:
-        lines.append(f"Weight: {weight:.1f} kg")
-    if fr:
-        lines.append(f"Fire Rate: {_fmt(fr, ' RPM')}")
-    if modes:
-        lines.append(f"Fire Modes: {' / '.join(modes)}")
-
-    # Damage line with per-type breakdown
-    if total_dmg is not None and total_dmg > 0:
-        type_str = ""
-        if breakdown and len(breakdown) == 1:
-            type_str = f" ({list(breakdown.keys())[0]})"
-        elif breakdown and len(breakdown) > 1:
-            type_str = " (" + " / ".join(f"{lbl}: {v:.1f}" for lbl, v in breakdown.items()) + ")"
-        pellet_str = f" x{pellet_count}" if pellet_count > 1 else ""
-        dmg_part = f"Alpha Dmg: {_fmt(total_dmg, '', 1)}{pellet_str}{type_str}"
-        dps_part = f"DPS: {_fmt(dps, '', 1)}" if dps else ""
-        lines.append("  |  ".join(p for p in [dmg_part, dps_part] if p))
-
-    if capacity:
-        lines.append(f"Ammo: {_fmt(capacity)}")
-    if regen_rate or regen_cooldown:
-        parts = []
-        if regen_rate:
-            parts.append(f"Regen: {_fmt(regen_rate)}/s")
-        if regen_cooldown:
-            parts.append(f"Cooldown: {_fmt(regen_cooldown, 's', 1)}")
-        if regen_cost:
-            parts.append(f"Cost/Shot: {_fmt(regen_cost)}")
-        lines.append("  |  ".join(parts))
-    if proj_speed is not None:
-        try:
-            speed_f = float(proj_speed)
-            lifetime_f = float(proj_lifetime)
-            rng_m = speed_f * lifetime_f
-            # FPS weapons get "Absolute Range" (clearer in-context — these
-            # values are the projectile despawn distance, not effective
-            # range); ship weapons keep "Range" since the field has been
-            # stable there for releases. magazine_lookup is the FPS
-            # discriminator — only the FPS callsite passes it.
-            range_label = "Absolute Range" if magazine_lookup is not None else "Range"
-            if rng_m >= 1000:
-                lines.append(f"Velocity: {_fmt(proj_speed, ' m/s')}  |  {range_label}: {rng_m / 1000:,.1f} km")
-            else:
-                lines.append(f"Velocity: {_fmt(proj_speed, ' m/s')}  |  {range_label}: {rng_m:,.0f} m")
-        except (TypeError, ValueError):
-            pass
-
-    # Damage drop-off
-    if dmg_drop_min_dist is not None and dmg_drop_min_dist > 0:
-        drop_parts = [f"Full Dmg to: {dmg_drop_min_dist:.0f} m"]
-        if dmg_drop_per_m is not None and dmg_drop_per_m > 0:
-            drop_parts.append(f"Drop: -{dmg_drop_per_m:.2f}/m")
-        if dmg_drop_min is not None and dmg_drop_min > 0:
-            drop_parts.append(f"Min Dmg: {dmg_drop_min:.1f}")
-        lines.append("  |  ".join(drop_parts))
-
-    if pwr:
-        lines.append(f"Power Draw: {_fmt(pwr, ' PU/s')}")
-    if comp_hp is not None:
-        lines.append(f"Component HP: {_fmt(comp_hp)}")
-    if em_sig is not None or ir_sig is not None:
-        parts = []
-        if em_sig is not None:
-            parts.append(f"EM: {_fmt(em_sig)}")
-        if ir_sig is not None:
-            parts.append(f"IR: {_fmt(ir_sig)}")
-        lines.append("Signatures:  " + "  |  ".join(parts))
-    # Overheat temp is meaningful for ship weapons but not surfaced in-game
-    # for FPS weapons; skip it on the FPS path (magazine_lookup is the FPS
-    # discriminator — only the FPS callsite passes it).
-    if overheat is not None and magazine_lookup is None:
-        try:
-            if float(overheat) < _OVERHEAT_PLACEHOLDER:
-                lines.append(f"Overheat Temp: {_fmt(overheat, 'K')}")
-        except (ValueError, TypeError):
-            lines.append(f"Overheat Temp: {_fmt(overheat, 'K')}")
-    return "\\n".join(lines)
+enhancements_fps_attachment = _enh_formatters.enhancements_fps_attachment
+enhancements_ship_fuel = _enh_formatters.enhancements_ship_fuel
+enhancements_countermeasure = _enh_formatters.enhancements_countermeasure
+enhancements_lifesupport = _enh_formatters.enhancements_lifesupport
+enhancements_cooler = _enh_formatters.enhancements_cooler
+enhancements_powerplant = _enh_formatters.enhancements_powerplant
+enhancements_quantum_drive = _enh_formatters.enhancements_quantum_drive
+enhancements_shield = _enh_formatters.enhancements_shield
+enhancements_missile = _enh_formatters.enhancements_missile
+enhancements_radar = _enh_formatters.enhancements_radar
+enhancements_mission = _enh_formatters.enhancements_mission
+enhancements_weapon = _enh_formatters.enhancements_weapon
+enhancements_ship_dataforge = _enh_formatters.enhancements_ship_dataforge
 
 
 # ── Ship enhancements (DataForge-based) ──────────────────────────────────────────────
@@ -2773,98 +2019,8 @@ def _armor_stats_block(armor_root: ET.Element) -> str:
     return "\\n".join(lines)
 
 
-def enhancements_ship_dataforge(
-    root: ET.Element,
-    controller_root: ET.Element | None,
-    loc: dict | None = None,
-    armor_lookup: dict[str, ET.Element] | None = None,
-) -> str:
-    """Generate stats block for a spaceship from DataForge entity + flight controller."""
-    vpc = _find(root, "VehicleComponentParams")
-    if vpc is None:
-        return ""
-
-    crew_size = vpc.get("crewSize")
-    career_key = (vpc.get("vehicleCareer") or "").lstrip("@")
-    role_key = (vpc.get("vehicleRole") or "").lstrip("@")
-    career = (loc or {}).get(career_key) if career_key else None
-    role = (loc or {}).get(role_key) if role_key else None
-
-    bbox = vpc.find("maxBoundingBoxSize")
-    length = bbox.get("y") if bbox is not None else None
-
-    # Insurance — DataForge tag is lowercase 'shipInsuranceParams', __type is 'ShipInsuranceParams'
-    ins = _find(root, "shipInsuranceParams")
-    ins_base = ins.get("baseWaitTimeMinutes") if ins is not None else None
-    ins_express = ins.get("mandatoryWaitTimeMinutes") if ins is not None else None
-
-    # Default loadout summary
-    weapons_line, core_line = _loadout_summary(root)
-
-    # Default armor (via hardpoint_armor/hardpoint_armour loadout entry → armor
-    # XML lookup). Both spellings appear in the data — American form is more
-    # common (~554 ships) but some use British (~262).
-    armor_block = ""
-    if armor_lookup:
-        for entry in root.iter("SItemPortLoadoutEntryParams"):
-            if entry.get("itemPortName") in ("hardpoint_armor", "hardpoint_armour"):
-                armor_class = (entry.get("entityClassName") or "").lower()
-                if armor_class:
-                    armor_root = armor_lookup.get(armor_class)
-                    if armor_root is not None:
-                        armor_block = _armor_stats_block(armor_root)
-                break
-
-    # Flight stats from controller
-    scm = max_spd = boost_fwd = boost_bwd = None
-    pitch = roll = yaw = None
-    if controller_root is not None:
-        ifcs = _find(controller_root, "IFCSParams")
-        if ifcs is not None:
-            scm = ifcs.get("scmSpeed")
-            max_spd = ifcs.get("maxSpeed")
-            boost_fwd = ifcs.get("boostSpeedForward")
-            boost_bwd = ifcs.get("boostSpeedBackward")
-        sp = _find_by_type(controller_root, "SIFCSSpeedProfile")
-        if sp is not None:
-            av = sp.find("angularVelocity")
-            if av is not None:
-                pitch = av.get("x")  # pitch rate °/s
-                roll = av.get("y")  # roll rate  °/s
-                yaw = av.get("z")  # yaw rate   °/s
-
-    lines = []
-
-    if scm is not None or max_spd is not None:
-        lines.append(f"SCM: {_fmt(scm, ' m/s')}  |  Max: {_fmt(max_spd, ' m/s')}")
-    if boost_fwd is not None or boost_bwd is not None:
-        lines.append(f"Boost: +{_fmt(boost_fwd, ' m/s')}  /  -{_fmt(boost_bwd, ' m/s')}")
-    if pitch is not None:
-        lines.append(f"Pitch: {_fmt(pitch, '°/s')}  |  Roll: {_fmt(roll, '°/s')}  |  Yaw: {_fmt(yaw, '°/s')}")
-
-    basics = []
-    if crew_size is not None:
-        basics.append(f"Crew: {_fmt(crew_size)}")
-    if length is not None:
-        basics.append(f"Length: {_fmt(length, 'm', 1)}")
-    if career is not None:
-        basics.append(f"Class: {career}")
-    if role is not None:
-        basics.append(f"Role: {role}")
-    if basics:
-        lines.append("  |  ".join(basics))
-
-    if weapons_line:
-        lines.append(weapons_line)
-    if core_line:
-        lines.append(core_line)
-    if armor_block:
-        lines.append(armor_block)
-
-    if ins_base is not None:
-        lines.append(f"Insurance: {_fmt(ins_base, ' min', 2)} base  |  {_fmt(ins_express, ' min', 2)} express")
-
-    return "\\n".join(lines)
+_enh_formatters._loadout_summary = _loadout_summary
+_enh_formatters._armor_stats_block = _armor_stats_block
 
 
 def scan_spaceships(
@@ -3229,7 +2385,11 @@ def main(
         + (1 if _want("missile_enhancements") else 0)
         + (1 if _want("ship_weapon_descs") else 0)
         + (1 if _want("fps_weapon_descs") else 0)
+        + (1 if _want("fps_attachment_descs") else 0)
         + (2 if _want("ship_descs") else 0)  # controller+armor lookup, scan
+        + (1 if _want("ship_fuel_descs") else 0)
+        + (1 if _want("countermeasure_descs") else 0)
+        + (1 if _want("lifesupport_descs") else 0)
         + (4 if _want("mission_rewards") else 0)  # rep lookup, scan, bp pools, contractgen+XP
         + (1 if _want("commodity_crafting") or _want("journal") else 0)
         + 1  # write files
@@ -3343,12 +2503,13 @@ def main(
         out: dict[str, str] = {}
         logger.info("Processing ship components…")
         _flush()
-        for subdir, fn in [
+        component_scan_specs = [
             ("shieldgenerator", enhancements_shield),
             ("cooler", enhancements_cooler),
             ("powerplant", enhancements_powerplant),
             ("quantumdrive", enhancements_quantum_drive),
-        ]:
+        ]
+        for subdir, fn in component_scan_specs:
             logger.info(f"Processing {subdir}...")
             _flush()
             out.update(scan_entity_dir(ships_scitem / subdir, fn, loc=loc, generate_name_tags=True))
@@ -3518,11 +2679,48 @@ def main(
         _tick("Generated FPS weapon descriptions")
         return out
 
+    def _gen_fps_attachments() -> dict[str, str]:
+        out: dict[str, str] = {}
+        mod_dir = records / "entities" / "scitem" / "weapons" / "weapon_modifier"
+        if mod_dir.exists():
+            out = scan_entity_dir(mod_dir, enhancements_fps_attachment, loc=loc)
+        logger.info(f"Finished FPS attachments ({len(out)} entries)")
+        _tick("Generated FPS attachment descriptions")
+        return out
+
     def _gen_ships() -> dict[str, str]:
         spaceships_dir = records / "entities" / "spaceships"
         out = scan_spaceships(spaceships_dir, controller_lookup, loc, armor_lookup)
         logger.info(f"Finished ships ({len(out)} entries)")
         _tick("Generated ship descriptions")
+        return out
+
+    def _gen_ship_fuel() -> dict[str, str]:
+        out: dict[str, str] = {}
+        for subdir in ("fuel_intakes", "fueltanks"):
+            target = ships_scitem / subdir
+            if target.exists():
+                out.update(scan_entity_dir(target, enhancements_ship_fuel, loc=loc))
+        logger.info(f"Finished ship fuel ({len(out)} entries)")
+        _tick("Generated ship fuel descriptions")
+        return out
+
+    def _gen_countermeasures() -> dict[str, str]:
+        out: dict[str, str] = {}
+        cm_dir = ships_scitem / "countermeasures"
+        if cm_dir.exists():
+            out = scan_entity_dir(cm_dir, enhancements_countermeasure, loc=loc)
+        logger.info(f"Finished countermeasures ({len(out)} entries)")
+        _tick("Generated countermeasure descriptions")
+        return out
+
+    def _gen_lifesupport() -> dict[str, str]:
+        out: dict[str, str] = {}
+        lf_dir = ships_scitem / "lifesupport"
+        if lf_dir.exists():
+            out = scan_entity_dir(lf_dir, enhancements_lifesupport, loc=loc)
+        logger.info(f"Finished life support ({len(out)} entries)")
+        _tick("Generated life support descriptions")
         return out
 
     def _gen_missions() -> dict[str, str]:
@@ -3987,29 +3185,37 @@ def main(
 
     # ── Submit enabled generators to a thread pool ────────────────────────────
     gen_jobs: dict[str, Callable] = {}
-    if _want("component_descs"):
-        gen_jobs["components"] = _gen_components
-    if _want("missile_enhancements"):
-        gen_jobs["missiles"] = _gen_missiles
-    if _want("ship_weapon_descs"):
-        gen_jobs["ship_weapons"] = _gen_ship_weapons
-    if _want("fps_weapon_descs"):
-        gen_jobs["fps_weapons"] = _gen_fps_weapons
-    if _want("ship_descs"):
-        gen_jobs["ships"] = _gen_ships
-    if _want("mission_rewards"):
-        gen_jobs["missions"] = _gen_missions
+    job_specs: list[tuple[str, str, Callable]] = [
+        ("component_descs", "components", _gen_components),
+        ("missile_enhancements", "missiles", _gen_missiles),
+        ("ship_weapon_descs", "ship_weapons", _gen_ship_weapons),
+        ("fps_weapon_descs", "fps_weapons", _gen_fps_weapons),
+        ("fps_attachment_descs", "fps_attachments", _gen_fps_attachments),
+        ("ship_descs", "ships", _gen_ships),
+        ("ship_fuel_descs", "ship_fuel", _gen_ship_fuel),
+        ("countermeasure_descs", "countermeasures", _gen_countermeasures),
+        ("lifesupport_descs", "lifesupport", _gen_lifesupport),
+        ("mission_rewards", "missions", _gen_missions),
+    ]
+    for enhancement_key, job_name, job_fn in job_specs:
+        if _want(enhancement_key):
+            gen_jobs[job_name] = job_fn
     if _want("commodity_crafting") or _want("journal"):
         gen_jobs["commodity_journal"] = _gen_commodity_journal
 
-    out_components: dict[str, str] = {}
-    out_missiles: dict[str, str] = {}
-    out_ship_weapons: dict[str, str] = {}
-    out_fps_weapons: dict[str, str] = {}
-    out_ships: dict[str, str] = {}
-    out_missions: dict[str, str] = {}
-    out_commodities: dict[str, str] = {}
-    out_journal: dict[str, str] = {}
+    outputs_by_key: dict[str, dict[str, str]] = {key: {} for key in ENHANCEMENT_OUTPUT_FILES}
+    job_to_enhancement_key = {
+        "components": "component_descs",
+        "missiles": "missile_enhancements",
+        "ship_weapons": "ship_weapon_descs",
+        "fps_weapons": "fps_weapon_descs",
+        "fps_attachments": "fps_attachment_descs",
+        "ships": "ship_descs",
+        "ship_fuel": "ship_fuel_descs",
+        "countermeasures": "countermeasure_descs",
+        "lifesupport": "lifesupport_descs",
+        "missions": "mission_rewards",
+    }
 
     if gen_jobs:
         logger.info(
@@ -4020,20 +3226,12 @@ def main(
             futs = {name: pool.submit(fn) for name, fn in gen_jobs.items()}
             for name, fut in futs.items():
                 result = fut.result()
-                if name == "components":
-                    out_components = result
-                elif name == "missiles":
-                    out_missiles = result
-                elif name == "ship_weapons":
-                    out_ship_weapons = result
-                elif name == "fps_weapons":
-                    out_fps_weapons = result
-                elif name == "ships":
-                    out_ships = result
-                elif name == "missions":
-                    out_missions = result
+                if name in job_to_enhancement_key:
+                    outputs_by_key[job_to_enhancement_key[name]] = result
                 elif name == "commodity_journal":
                     out_commodities, out_journal = result
+                    outputs_by_key["commodity_crafting"] = out_commodities
+                    outputs_by_key["journal"] = out_journal
 
     # ── Apply loc-string workarounds for CIG data bugs ────────────────────────
     # XML patches we ran before this script realigned the enhancement
@@ -4052,16 +3250,7 @@ def main(
             workarounds = load_locstring_workarounds(patches_dir)
             if workarounds:
                 total_applied = 0
-                for out_dict in (
-                    out_missions,
-                    out_components,
-                    out_ship_weapons,
-                    out_fps_weapons,
-                    out_ships,
-                    out_missiles,
-                    out_commodities,
-                    out_journal,
-                ):
+                for out_dict in outputs_by_key.values():
                     total_applied += apply_locstring_workarounds(out_dict, workarounds)
                 logger.info(f"Loc-string workarounds: {total_applied}/{len(workarounds)} applied")
                 _flush()
@@ -4071,33 +3260,11 @@ def main(
     # ── Write output ──────────────────────────────────────────────────────────
     logger.info("Writing output files…")
     _flush()
-    if _want("ship_descs"):
-        write_ini(output_dir / "ships_desc_enhancements.ini", out_ships)
-    if _want("component_descs"):
-        write_ini(output_dir / "components_desc_enhancements.ini", out_components)
-    if _want("ship_weapon_descs"):
-        write_ini(output_dir / "ship_weapons_desc_enhancements.ini", out_ship_weapons)
-    if _want("fps_weapon_descs"):
-        write_ini(output_dir / "fps_weapons_desc_enhancements.ini", out_fps_weapons)
-    if _want("mission_rewards"):
-        write_ini(output_dir / "mission_rewards_enhancements.ini", out_missions)
-    if _want("commodity_crafting"):
-        write_ini(output_dir / "commodity_crafting_enhancements.ini", out_commodities)
-    if _want("journal"):
-        write_ini(output_dir / "journal_enhancements.ini", out_journal)
-    if _want("missile_enhancements"):
-        write_ini(output_dir / "missile_enhancements.ini", out_missiles)
+    for enhancement_key, file_name in ENHANCEMENT_OUTPUT_FILES.items():
+        if _want(enhancement_key):
+            write_ini(output_dir / file_name, outputs_by_key[enhancement_key])
 
-    total = (
-        len(out_ships)
-        + len(out_components)
-        + len(out_ship_weapons)
-        + len(out_fps_weapons)
-        + len(out_missions)
-        + len(out_commodities)
-        + len(out_journal)
-        + len(out_missiles)
-    )
+    total = sum(len(v) for k, v in outputs_by_key.items() if _want(k))
     logger.info(f"Done — {total:,} total stat entries written to {output_dir}")
     _tick("Wrote all output files")
     if _sink is not None:
