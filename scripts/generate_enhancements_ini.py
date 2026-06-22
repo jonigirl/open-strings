@@ -314,6 +314,7 @@ def _is_sentinel_loc_ref(ref: str) -> bool:
 _PLACEHOLDER_TEXTS = frozenset(
     {
         "<= PLACEHOLDER =>",
+        "← PLACEHOLDER →",
         "<Place Holder>",
         "<= UNINITIALIZED =>",
         "<= BADSTRING =>",
