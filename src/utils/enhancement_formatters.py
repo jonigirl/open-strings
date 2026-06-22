@@ -29,17 +29,48 @@ _OVERHEAT_PLACEHOLDER = 450_000
 
 # Hook points that are supplied by scripts/generate_enhancements_ini.py.
 # Lightweight defaults keep this module importable and test-safe.
-_mission_loc_key = lambda root: None
-_classify_mission_engagement = lambda loc_key: "Ship"
-_extract_mission_flags = lambda root: []
-_extract_difficulty = lambda element: ""
-_extract_mission_xp = lambda root, reputation_lookup=None: 0
-_extract_spawn_counts = lambda element: (0, 0, 0)
-_extract_turret_info = lambda root: None
-_fire_rate = lambda root: None
-_fire_modes = lambda root, loc=None: []
-_loadout_summary = lambda root: ("", "")
-_armor_stats_block = lambda armor_root: ""
+def _mission_loc_key(root):
+    return None
+
+
+def _classify_mission_engagement(loc_key):
+    return "Ship"
+
+
+def _extract_mission_flags(root):
+    return []
+
+
+def _extract_difficulty(element):
+    return ""
+
+
+def _extract_mission_xp(root, reputation_lookup=None):
+    return 0
+
+
+def _extract_spawn_counts(element):
+    return (0, 0, 0)
+
+
+def _extract_turret_info(root):
+    return None
+
+
+def _fire_rate(root):
+    return None
+
+
+def _fire_modes(root, loc=None):
+    return []
+
+
+def _loadout_summary(root):
+    return ("", "")
+
+
+def _armor_stats_block(armor_root):
+    return ""
 
 
 def _poly_type(elem: ET.Element) -> str:
