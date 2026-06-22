@@ -30,10 +30,16 @@ a = Analysis(
     # for parsing DataForge XML. It was previously pulled in indirectly via
     # dataforge_patcher.py, which was switched to lxml in 1.3.0, leaving
     # xml.etree with no analyzed reference and breaking enhancements generation.
+    # The enhancement generator was refactored to import formatter/helpers from
+    # src.utils modules, so those imports must also be listed here because the
+    # generator is bundled as data and not analyzed directly.
     hiddenimports=[
         'PyQt6.QtCore', 'PyQt6.QtGui', 'PyQt6.QtWidgets',
         'src.utils.progress_sink',
         'src.utils.dataforge_patcher',
+        'src.utils.enhancement_formatters',
+        'src.utils.dataforge_xml',
+        'src.utils.formatting',
         'concurrent.futures',
         'xml.etree.ElementTree',
     ],
