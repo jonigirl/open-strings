@@ -12,6 +12,7 @@ AppVersion={#AppVer}
 AppPublisher=Joni Hayes
 DefaultDirName={localappdata}\Joni Hayes\Open Strings
 DefaultGroupName=Open Strings
+UninstallDisplayIcon={app}\OpenStrings.exe
 OutputDir=dist
 OutputBaseFilename=OpenStrings-{#AppVer}-Setup
 Compression=lzma
