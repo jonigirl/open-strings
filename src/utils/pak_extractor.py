@@ -10,9 +10,12 @@ import tempfile
 import threading
 import time
 import uuid
+import xml.etree.ElementTree as ET
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
+from src.utils.dataforge_contract import DATAFORGE_KEEP_SUBPATHS
 from src.utils.file_utils import robust_rmtree
 from src.utils.perf import timed
 
@@ -28,8 +31,8 @@ _active_procs_lock = threading.Lock()
 _GLOBAL_INI_RELATIVE = Path("data/Localization/english/global.ini")
 
 
-# Subtrees of unforge's ``libs/foundry/records/`` that the enhancement
-# generator actually reads. Everything else unforge produces is copied nowhere
+# dataforge_contract.py owns the retained subtrees the enhancement generator
+# reads. Everything else unforge produces is copied nowhere
 # — the temp extraction is thrown away when the with-block exits.
 #
 # Keeping this list tight:
@@ -50,29 +53,23 @@ _GLOBAL_INI_RELATIVE = Path("data/Localization/english/global.ini")
 # generate_enhancements_ini.py`` reads via ``records / ...``. If a future
 # generator feature reads a new subtree, add it here or the cache won't
 # contain it and enhancements for that subtree will silently be empty.
-# ``tests/test_pak_extraction.py`` has a regression test that diffs this
-# list against a hardcoded copy of the generator's read-paths so drift is
-# caught at test time.
-DATAFORGE_KEEP_SUBPATHS: tuple[str, ...] = (
-    "entities/scitem",
-    "entities/spaceships",
-    "entities/missions",
-    "entities/contracts",
-    "entities/jobterminal",
-    "contracts/contractgenerator",
-    "contracts/contracttemplates",
-    "crafting/blueprintrewards",
-    "crafting/blueprints/crafting",
-    "missionbroker/pu_missions",
-    "ammoparams/vehicle",
-    "ammoparams/fps",
-    "reputation/rewards/missionrewards_reputation",
-)
-
+# ``tests/test_pak_extraction.py`` derives generator reads from its AST and
+# verifies they remain covered by this contract.
 DATAFORGE_IDENTITY_FILE = ".dataforge_identity.json"
 DATAFORGE_CACHE_SCHEMA_VERSION = 2
 DATAFORGE_PRISTINE_DIR = "pristine"
 DATAFORGE_PATCHED_DIR = "raw"
+DATAFORGE_REQUIRED_HEALTH_SUBPATHS = ("entities/scitem", "entities/spaceships")
+
+
+@dataclass(frozen=True)
+class DataForgeHealthReport:
+    """Essential DataForge cache health evidence collected before activation."""
+
+    xml_counts: dict[str, int]
+
+    def summary_line(self) -> str:
+        return ", ".join(f"{path}: {count} XML" for path, count in self.xml_counts.items())
 
 
 def _copy_filtered_records(src_libs: Path, dst_libs: Path) -> tuple[int, int]:
@@ -115,6 +112,31 @@ def _copy_filtered_records(src_libs: Path, dst_libs: Path) -> tuple[int, int]:
         copied += 1
 
     return copied, skipped
+
+
+def validate_dataforge_cache(cache_dir: Path) -> DataForgeHealthReport:
+    """Require parseable XML in the essential patched DataForge subtrees."""
+    records = cache_dir / DATAFORGE_PATCHED_DIR / "libs" / "foundry" / "records"
+    counts: dict[str, int] = {}
+    for subpath in DATAFORGE_REQUIRED_HEALTH_SUBPATHS:
+        count = 0
+        for xml_file in (records / subpath).rglob("*.xml"):
+            count += 1
+            try:
+                ET.parse(xml_file)
+            except ET.ParseError as exc:
+                raise RuntimeError(f"DataForge health check failed: invalid XML in {xml_file}: {exc}") from exc
+        if count == 0:
+            raise RuntimeError(f"DataForge health check failed: no XML files under required subtree {subpath}")
+        counts[subpath] = count
+    return DataForgeHealthReport(xml_counts=counts)
+
+
+def _has_required_dataforge_xml(cache_dir: Path) -> bool:
+    records = cache_dir / DATAFORGE_PATCHED_DIR / "libs" / "foundry" / "records"
+    return all(
+        next((records / subpath).rglob("*.xml"), None) is not None for subpath in DATAFORGE_REQUIRED_HEALTH_SUBPATHS
+    )
 
 
 def _replace_dataforge_cache(staging_dir: Path, cache_dir: Path) -> None:
@@ -243,6 +265,8 @@ def rebuild_patched_dataforge_cache(
     try:
         shutil.copytree(pristine_libs, staging_root / DATAFORGE_PATCHED_DIR / "libs")
         finalize_callback(staging_root)
+        health = validate_dataforge_cache(staging_root)
+        logger.info("DataForge patched-cache health check passed: %s", health.summary_line())
         _replace_dataforge_cache(staging_root / DATAFORGE_PATCHED_DIR, cache_dir / DATAFORGE_PATCHED_DIR)
         identity["patch_fingerprint"] = patch_fingerprint
         (cache_dir / DATAFORGE_IDENTITY_FILE).write_text(json.dumps(identity, sort_keys=True), encoding="utf-8")
@@ -528,6 +552,8 @@ def extract_dataforge(
             _write_dataforge_identity(staging_dir, p4k_path, unp4k_exe, unforge_exe, patch_fingerprint)
             if finalize_callback is not None:
                 finalize_callback(staging_dir)
+            health = validate_dataforge_cache(staging_dir)
+            logger.info("DataForge health check passed: %s", health.summary_line())
             _replace_dataforge_cache(staging_dir, dataforge_cache_dir)
             logger.info(f"DataForge cache written to {dataforge_cache_dir}")
         finally:
@@ -572,7 +598,12 @@ def dataforge_cache_is_fresh(
     stamp = dataforge_cache_dir / ".p4k_mtime"
     pristine_libs = dataforge_cache_dir / DATAFORGE_PRISTINE_DIR / "libs"
     libs_dir = dataforge_cache_dir / DATAFORGE_PATCHED_DIR / "libs"
-    if not stamp.exists() or not pristine_libs.exists() or not libs_dir.exists():
+    if (
+        not stamp.exists()
+        or not pristine_libs.exists()
+        or not libs_dir.exists()
+        or not _has_required_dataforge_xml(dataforge_cache_dir)
+    ):
         return False
     # Verify there is at least one XML file — guards against empty extractions
     if not any(libs_dir.rglob("*.xml")):

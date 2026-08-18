@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+from src.utils.dataforge_contract import DATAFORGE_CATEGORY_SUBTREES
 from src.utils.dataforge_diff import (
     CATEGORY_SUBTREES,
     MANIFEST_FILE,
@@ -103,6 +104,17 @@ class TestUpdateManifest:
         update_manifest(tmp_path, progress_callback=lambda c, t, m: calls.append((c, t, m)))
         assert calls  # at least one call made
 
+    def test_progress_callback_reports_intermediate_batch(self, tmp_path: Path) -> None:
+        for index in range(256):
+            _write_xml(tmp_path / "foundry" / "records" / f"file{index}.xml")
+        calls: list[tuple[int, int, str]] = []
+
+        update_manifest(
+            tmp_path, progress_callback=lambda completed, total, message: calls.append((completed, total, message))
+        )
+
+        assert any(completed == 256 and total == 256 for completed, total, _ in calls)
+
 
 # ---------------------------------------------------------------------------
 # dirty_categories
@@ -120,6 +132,51 @@ class TestDirtyCategories:
         update_manifest(tmp_path)
         result = dirty_categories(tmp_path)
         assert result == set()
+
+    def test_clean_cache_rehashes_all_xml(self, tmp_path: Path, monkeypatch) -> None:
+        ship = tmp_path / "foundry" / "records" / "entities" / "spaceships" / "ship.xml"
+        mission = tmp_path / "foundry" / "records" / "missionbroker" / "pu_missions" / "mission.xml"
+        _write_xml(ship)
+        _write_xml(mission)
+        update_manifest(tmp_path)
+
+        from src.utils.dataforge_diff import _hash_file as real_hash
+
+        hashed: list[Path] = []
+
+        def track_hash(path: Path) -> str:
+            hashed.append(path)
+            return real_hash(path)
+
+        monkeypatch.setattr("src.utils.dataforge_diff._hash_file", track_hash)
+
+        assert dirty_categories(tmp_path) == set()
+        assert set(hashed) == {ship, mission}
+
+    def test_legacy_hash_only_manifest_remains_compatible(self, tmp_path: Path) -> None:
+        ship = tmp_path / "foundry" / "records" / "entities" / "spaceships" / "ship.xml"
+        _write_xml(ship)
+        update_manifest(tmp_path)
+        manifest_path = tmp_path / MANIFEST_FILE
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        entry = manifest["foundry/records/entities/spaceships/ship.xml"]
+        entry.pop("size")
+        entry.pop("mtime_ns")
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        assert dirty_categories(tmp_path) == set()
+
+    def test_same_size_timestamp_preserved_edit_is_dirty(self, tmp_path: Path) -> None:
+        ship = tmp_path / "foundry" / "records" / "entities" / "spaceships" / "ship.xml"
+        _write_xml(ship, "<root>A</root>")
+        update_manifest(tmp_path)
+        before = ship.stat()
+        ship.write_text("<root>B</root>", encoding="utf-8")
+        import os
+
+        os.utime(ship, ns=(before.st_atime_ns, before.st_mtime_ns))
+
+        assert "ships" in dirty_categories(tmp_path)
 
     def test_returns_dirty_category_when_file_changes(self, tmp_path: Path) -> None:
         ship = tmp_path / "foundry" / "records" / "entities" / "spaceships" / "ship.xml"
@@ -229,3 +286,9 @@ class TestCategorySubtreesPaths:
         all_prefixes = [p for subtrees in CATEGORY_SUBTREES.values() for p in subtrees]
         assert "entities/itemports" not in all_prefixes
         assert "foundry/records/entities/itemports" not in all_prefixes
+
+    def test_category_subtrees_are_immutable(self) -> None:
+        with pytest.raises(TypeError):
+            DATAFORGE_CATEGORY_SUBTREES["new"] = ("foundry/records/new",)
+        with pytest.raises(AttributeError):
+            DATAFORGE_CATEGORY_SUBTREES["ships"].append("foundry/records/other")

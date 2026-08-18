@@ -28,45 +28,16 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from src.utils.dataforge_contract import DATAFORGE_CATEGORY_SUBTREES
+
 MANIFEST_FILE = ".diff_manifest.json"
 _HASH_WORKERS = max(8, (os.cpu_count() or 4) * 2)
 
 # Maps category name → DataForge subtree prefixes it reads from.
 # Paths are relative to the libs/ directory (the cache_dir argument passed to
 # update_manifest and dirty_categories), so they all start with
-# "foundry/records/".  Mirrors DATAFORGE_KEEP_SUBPATHS in pak_extractor.py —
-# keep in sync when new subtrees are added.
-CATEGORY_SUBTREES: dict[str, list[str]] = {
-    "ships": ["foundry/records/entities/spaceships"],
-    "components": ["foundry/records/entities/scitem"],
-    "ship_weapons": [
-        "foundry/records/entities/scitem/ships/weapons",
-        "foundry/records/ammoparams/vehicle",
-    ],
-    "fps_weapons": [
-        "foundry/records/entities/scitem/weapons/fps_weapons",
-        "foundry/records/ammoparams/fps",
-    ],
-    "missions": [
-        "foundry/records/missionbroker/pu_missions",
-        "foundry/records/entities/missions",
-        "foundry/records/entities/contracts",
-        "foundry/records/entities/jobterminal",
-        "foundry/records/contracts/contractgenerator",
-        "foundry/records/contracts/contracttemplates",
-        "foundry/records/crafting/blueprintrewards",
-        "foundry/records/crafting/blueprints/crafting",
-        "foundry/records/reputation/rewards/missionrewards_reputation",
-    ],
-    "commodities": [
-        "foundry/records/crafting/blueprints/crafting",
-        "foundry/records/entities/scitem",
-    ],
-    "journal": [
-        "foundry/records/crafting/blueprints/crafting",
-        "foundry/records/entities/scitem",
-    ],
-}
+# "foundry/records/". Defined with the keep-list in dataforge_contract.py.
+CATEGORY_SUBTREES = DATAFORGE_CATEGORY_SUBTREES
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +54,20 @@ def _hash_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def _xml_file_metadata(cache_dir: Path) -> dict[str, tuple[Path, int, int]]:
+    """Return XML paths with their size and nanosecond mtime without reading content."""
+    metadata: dict[str, tuple[Path, int, int]] = {}
+    for root, _, files in os.walk(cache_dir):
+        for filename in files:
+            if not filename.endswith(".xml"):
+                continue
+            path = Path(root) / filename
+            stat = path.stat()
+            rel = str(path.relative_to(cache_dir)).replace("\\", "/")
+            metadata[rel] = (path, stat.st_size, stat.st_mtime_ns)
+    return metadata
+
+
 def _build_snapshot(
     cache_dir: Path,
     progress_callback: Callable[[int, int, str], None] | None = None,
@@ -91,14 +76,8 @@ def _build_snapshot(
         { "relative/path.xml": {"mtime": float, "sha256": str}, ... }
     Uses a ThreadPoolExecutor for parallel SHA-256 hashing.
     """
-    paths: list[tuple[Path, str]] = []
-    for root, _, files in os.walk(cache_dir):
-        for fname in files:
-            if not fname.endswith(".xml"):
-                continue
-            abs_path = Path(root) / fname
-            rel = str(abs_path.relative_to(cache_dir)).replace("\\", "/")
-            paths.append((abs_path, rel))
+    metadata = _xml_file_metadata(cache_dir)
+    paths = [(path, rel, size, mtime_ns) for rel, (path, size, mtime_ns) in metadata.items()]
 
     total = len(paths)
     if progress_callback:
@@ -108,9 +87,14 @@ def _build_snapshot(
     if total == 0:
         return snapshot
 
-    def _hash_one(item: tuple[Path, str]) -> tuple[str, dict]:
-        abs_path, rel = item
-        return rel, {"mtime": abs_path.stat().st_mtime, "sha256": _hash_file(abs_path)}
+    def _hash_one(item: tuple[Path, str, int, int]) -> tuple[str, dict]:
+        abs_path, rel, size, mtime_ns = item
+        return rel, {
+            "mtime": abs_path.stat().st_mtime,
+            "mtime_ns": mtime_ns,
+            "size": size,
+            "sha256": _hash_file(abs_path),
+        }
 
     completed = 0
     next_report = 256
@@ -178,16 +162,16 @@ def dirty_categories(cache_dir: Path) -> set[str] | None:
 
     new = _build_snapshot(cache_dir)
 
-    # Find changed paths (added, removed, or different hash)
+    # Compare every content hash. Metadata is preserved in the manifest for
+    # diagnostics, but cannot be trusted as an integrity signal because a
+    # same-size edit can restore its original timestamp.
     all_paths = set(old) | set(new)
     changed: set[str] = set()
     for rel in all_paths:
         if rel not in old or rel not in new:
             changed.add(rel)  # added or removed
-        elif old[rel]["mtime"] != new[rel]["mtime"]:
-            # mtime differs — confirm with hash before marking dirty
-            if old[rel]["sha256"] != new[rel]["sha256"]:
-                changed.add(rel)
+        elif old[rel].get("sha256") != new[rel].get("sha256"):
+            changed.add(rel)
 
     if not changed:
         return set()  # clean — skip all generators

@@ -2552,15 +2552,15 @@ def main(
         logger.info("Processing ship components…")
         _flush()
         component_scan_specs = [
-            ("shieldgenerator", enhancements_shield),
-            ("cooler", enhancements_cooler),
-            ("powerplant", enhancements_powerplant),
-            ("quantumdrive", enhancements_quantum_drive),
+            (records / "entities" / "scitem" / "ships" / "shieldgenerator", enhancements_shield),
+            (records / "entities" / "scitem" / "ships" / "cooler", enhancements_cooler),
+            (records / "entities" / "scitem" / "ships" / "powerplant", enhancements_powerplant),
+            (records / "entities" / "scitem" / "ships" / "quantumdrive", enhancements_quantum_drive),
         ]
-        for subdir, fn in component_scan_specs:
-            logger.info(f"Processing {subdir}...")
+        for component_dir, fn in component_scan_specs:
+            logger.info(f"Processing {component_dir.name}...")
             _flush()
-            out.update(scan_entity_dir(ships_scitem / subdir, fn, loc=loc, generate_name_tags=True))
+            out.update(scan_entity_dir(component_dir, fn, loc=loc, generate_name_tags=True))
         radar_dir = ships_scitem / "radar"
         if radar_dir.exists():
             logger.info(f"Processing radars from {radar_dir}…")
@@ -2745,8 +2745,10 @@ def main(
 
     def _gen_ship_fuel() -> dict[str, str]:
         out: dict[str, str] = {}
-        for subdir in ("fuel_intakes", "fueltanks"):
-            target = ships_scitem / subdir
+        for target in (
+            records / "entities" / "scitem" / "ships" / "fuel_intakes",
+            records / "entities" / "scitem" / "ships" / "fueltanks",
+        ):
             if target.exists():
                 out.update(scan_entity_dir(target, enhancements_ship_fuel, loc=loc))
         logger.info(f"Finished ship fuel ({len(out)} entries)")

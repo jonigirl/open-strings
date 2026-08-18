@@ -10,6 +10,7 @@ Covers:
 - extract_global_ini happy path and error paths
 """
 
+import ast
 import json
 import os
 import stat
@@ -31,6 +32,7 @@ from src.utils.pak_extractor import (
     extract_global_ini,
     rebuild_patched_dataforge_cache,
     robust_rmtree,
+    validate_dataforge_cache,
 )
 
 
@@ -193,6 +195,9 @@ class TestDataForgeExtraction:
                 records = Path(args[1]).parent / "libs" / "foundry" / "records" / "entities" / "scitem"
                 records.mkdir(parents=True)
                 (records / "item.xml").write_text("<item>original</item>", encoding="utf-8")
+                spaceships = records.parent / "spaceships"
+                spaceships.mkdir()
+                (spaceships / "ship.xml").write_text("<ship/>", encoding="utf-8")
             return MagicMock(returncode=0, stdout="", stderr="")
 
         def finalize(staging_root):
@@ -213,43 +218,70 @@ class TestDataForgeExtraction:
 # Filtered cache copy (cache streamlining — 0.9.3)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Every `records / <path>` that `scripts/generate_enhancements_ini.py`
-# currently reads from. Duplicated here on purpose: this is the
-# **contract** between the extractor's keep-list and the generator's
-# read-list. If the generator grows a new read path, adding it to
-# DATAFORGE_KEEP_SUBPATHS also requires adding it here (or something that
-# covers it), which makes the maintenance coupling explicit.
-#
-# To update: run `grep -n 'records / "' scripts/generate_enhancements_ini.py`
-# and ensure every leaf path is covered by some entry in
-# DATAFORGE_KEEP_SUBPATHS.
-GENERATOR_READ_SUBPATHS = (
-    "entities/scitem",  # build_scitem_lookups
-    "entities/scitem/ships/controller",  # build_controller_lookup
-    "entities/scitem/ships/armor",  # build_armor_lookup
-    "entities/scitem/ships/shieldgenerator",  # components gen (indirect via scitem)
-    "entities/scitem/ships/cooler",
-    "entities/scitem/ships/powerplant",
-    "entities/scitem/ships/quantumdrive",
-    "entities/scitem/ships/radar",
-    "entities/scitem/ships/weapons",  # ship weapons + missiles
-    "entities/scitem/weapons/fps_weapons",  # FPS weapon descriptions
-    "entities/scitem/carryables",  # commodity-crafting carryable lookups
-    "entities/spaceships",  # scan_spaceships
-    "ammoparams/vehicle",
-    "ammoparams/fps",
-    "reputation/rewards/missionrewards_reputation",
-    "contracts/contractgenerator",  # scan_contract_generators
-    "contracts/contracttemplates",  # template fallback in scan_contract_generators
-    "crafting/blueprintrewards/blueprintmissionpools",  # blueprint_pools lookup
-    "crafting/blueprints/crafting",  # crafting blueprint scan
-    "missionbroker/pu_missions",  # mission XP augmentation
-    # Guarded reads (may or may not exist in a given patch; extractor keeps
-    # the parent subtree, generator guards with `if dir.exists()`):
-    "entities/missions",
-    "entities/contracts",
-    "entities/jobterminal",
-)
+
+_GENERATOR_SCRIPT = Path(__file__).parent.parent / "scripts" / "generate_enhancements_ini.py"
+
+
+def _records_path(node: ast.AST, aliases: dict[str, tuple[str, ...]]) -> tuple[str, ...] | None:
+    """Resolve a literal records path, including aliases derived from records."""
+    if isinstance(node, ast.Name):
+        if node.id == "records":
+            return ()
+        return aliases.get(node.id)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        parent = _records_path(node.left, aliases)
+        if parent is None:
+            return None
+        if not isinstance(node.right, ast.Constant) or not isinstance(node.right.value, str):
+            raise AssertionError(f"Unsupported dynamic DataForge records path: {ast.unparse(node)}")
+        return (*parent, node.right.value)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "joinpath":
+        parent = _records_path(node.func.value, aliases)
+        if parent is None:
+            return None
+        if not all(isinstance(arg, ast.Constant) and isinstance(arg.value, str) for arg in node.args):
+            raise AssertionError(f"Unsupported dynamic DataForge records path: {ast.unparse(node)}")
+        return (*parent, *(arg.value for arg in node.args))
+    return None
+
+
+def _generator_read_subpaths(source: str | None = None) -> set[str]:
+    tree = ast.parse(source if source is not None else _GENERATOR_SCRIPT.read_text(encoding="utf-8"))
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    paths: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Name) or not isinstance(node.ctx, ast.Load) or node.id != "records":
+            continue
+        parent = parents.get(node)
+        if isinstance(parent, ast.Attribute) and parent.value is node and parent.attr in {"exists", "stat"}:
+            continue
+        if not (isinstance(parent, ast.BinOp) and isinstance(parent.op, ast.Div) and parent.left is node) and not (
+            isinstance(parent, ast.Assign) and parent.value is node
+        ):
+            raise AssertionError(f"Unsupported DataForge records binding: {ast.unparse(parent)}")
+    aliases: dict[str, tuple[str, ...]] = {}
+    assignments = sorted(
+        (node for node in ast.walk(tree) if isinstance(node, ast.Assign)), key=lambda node: node.lineno
+    )
+    for node in assignments:
+        if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
+            continue
+        alias_parts = _records_path(node.value, aliases)
+        if alias_parts is None:
+            continue
+        if not alias_parts:
+            raise AssertionError(f"Unsupported bare DataForge records alias: {ast.unparse(node)}")
+        aliases[node.targets[0].id] = alias_parts
+        paths.add("/".join(alias_parts))
+    for node in ast.walk(tree):
+        path_parts = _records_path(node, aliases)
+        if not path_parts:
+            continue
+        parent = parents.get(node)
+        if isinstance(parent, ast.BinOp) and isinstance(parent.op, ast.Div) and parent.left is node:
+            continue
+        paths.add("/".join(path_parts))
+    return paths
 
 
 def _is_subpath_of(child: str, parent: str) -> bool:
@@ -272,14 +304,14 @@ class TestDataForgeKeepList:
         """Every path the generator reads must lie under some kept subpath."""
         keep = DATAFORGE_KEEP_SUBPATHS
         uncovered = []
-        for read in GENERATOR_READ_SUBPATHS:
+        for read in _generator_read_subpaths():
             if not any(_is_subpath_of(read, k) for k in keep):
                 uncovered.append(read)
         assert not uncovered, (
             "Generator reads from paths the extractor does NOT cache:\n  "
             + "\n  ".join(uncovered)
             + "\nAdd these (or a common ancestor) to DATAFORGE_KEEP_SUBPATHS "
-            "in src/utils/pak_extractor.py."
+            "in src/utils/dataforge_contract.py."
         )
 
     def test_keep_list_has_no_redundant_entries(self):
@@ -295,6 +327,31 @@ class TestDataForgeKeepList:
         assert not redundant, (
             f"DATAFORGE_KEEP_SUBPATHS contains entries already covered by an ancestor entry: {redundant}"
         )
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "target = records / dynamic_subtree",
+            'for source in (records,):\n    target = source / "new_subtree"',
+        ],
+    )
+    def test_rejects_unsupported_records_path_bindings(self, source):
+        with pytest.raises(
+            AssertionError, match="Unsupported (dynamic DataForge records path|DataForge records binding)"
+        ):
+            _generator_read_subpaths(source)
+
+    def test_tracks_multi_step_literal_records_aliases(self):
+        paths = _generator_read_subpaths(
+            'base = records / "entities"\nships = base / "spaceships"\nscan(ships / "fighter")'
+        )
+
+        assert "entities" in paths
+        assert "entities/spaceships" in paths
+        assert "entities/spaceships/fighter" in paths
+
+    def test_allows_records_metadata_calls(self):
+        assert _generator_read_subpaths("records.exists()\nrecords.stat()") == set()
 
 
 @pytest.mark.unit
@@ -362,6 +419,51 @@ class TestCopyFilteredRecords:
 
         with pytest.raises(FileNotFoundError):
             _copy_filtered_records(src / "libs", tmp_path / "dst" / "libs")
+
+
+@pytest.mark.unit
+class TestDataForgeHealth:
+    def _write_required_xml(self, cache: Path) -> None:
+        records = cache / "raw" / "libs" / "foundry" / "records" / "entities"
+        for directory, content in (("scitem", "<item/>"), ("spaceships", "<ship/>")):
+            target = records / directory
+            target.mkdir(parents=True)
+            (target / "sample.xml").write_text(content, encoding="utf-8")
+
+    def test_reports_required_xml_counts(self, tmp_path):
+        cache = tmp_path / "dataforge"
+        self._write_required_xml(cache)
+
+        report = validate_dataforge_cache(cache)
+
+        assert report.xml_counts == {"entities/scitem": 1, "entities/spaceships": 1}
+
+    def test_rejects_missing_required_subtree(self, tmp_path):
+        cache = tmp_path / "dataforge"
+        records = cache / "raw" / "libs" / "foundry" / "records" / "entities" / "scitem"
+        records.mkdir(parents=True)
+        (records / "sample.xml").write_text("<item/>", encoding="utf-8")
+
+        with pytest.raises(RuntimeError, match="entities/spaceships"):
+            validate_dataforge_cache(cache)
+
+    def test_rejects_malformed_required_xml(self, tmp_path):
+        cache = tmp_path / "dataforge"
+        self._write_required_xml(cache)
+        malformed = cache / "raw" / "libs" / "foundry" / "records" / "entities" / "scitem" / "sample.xml"
+        malformed.write_text("<item>", encoding="utf-8")
+
+        with pytest.raises(RuntimeError, match="invalid XML"):
+            validate_dataforge_cache(cache)
+
+    def test_rejects_malformed_xml_after_valid_file(self, tmp_path):
+        cache = tmp_path / "dataforge"
+        self._write_required_xml(cache)
+        malformed = cache / "raw" / "libs" / "foundry" / "records" / "entities" / "scitem" / "later.xml"
+        malformed.write_text("<item>", encoding="utf-8")
+
+        with pytest.raises(RuntimeError, match="later.xml"):
+            validate_dataforge_cache(cache)
 
 
 @pytest.mark.unit
@@ -443,18 +545,21 @@ class TestAtomicCacheReplacement:
 class TestPatchedCacheRebuild:
     def test_rebuilds_raw_from_pristine_when_patch_set_changes(self, tmp_path):
         cache = tmp_path / "dataforge"
-        pristine_xml = cache / "pristine" / "libs" / "foundry" / "records" / "item.xml"
-        raw_xml = cache / "raw" / "libs" / "foundry" / "records" / "item.xml"
+        pristine_xml = cache / "pristine" / "libs" / "foundry" / "records" / "entities" / "scitem" / "item.xml"
+        raw_xml = cache / "raw" / "libs" / "foundry" / "records" / "entities" / "scitem" / "item.xml"
         pristine_xml.parent.mkdir(parents=True)
         raw_xml.parent.mkdir(parents=True)
         pristine_xml.write_text("<item>original</item>", encoding="utf-8")
         raw_xml.write_text("<item>old patch</item>", encoding="utf-8")
+        spaceship = pristine_xml.parents[1] / "spaceships" / "ship.xml"
+        spaceship.parent.mkdir()
+        spaceship.write_text("<ship/>", encoding="utf-8")
         (cache / ".dataforge_identity.json").write_text(
             json.dumps({"schema_version": 2, "patch_fingerprint": "old"}), encoding="utf-8"
         )
 
         def finalize(staging_root):
-            staged_xml = staging_root / "raw" / "libs" / "foundry" / "records" / "item.xml"
+            staged_xml = staging_root / "raw" / "libs" / "foundry" / "records" / "entities" / "scitem" / "item.xml"
             staged_xml.write_text("<item>new patch</item>", encoding="utf-8")
 
         rebuilt = rebuild_patched_dataforge_cache(cache, "new", finalize)
@@ -475,18 +580,38 @@ class TestPatchedCacheRebuild:
 
     def test_patch_removal_restores_raw_from_pristine(self, tmp_path):
         cache = tmp_path / "dataforge"
-        pristine_xml = cache / "pristine" / "libs" / "foundry" / "records" / "item.xml"
-        raw_xml = cache / "raw" / "libs" / "foundry" / "records" / "item.xml"
+        pristine_xml = cache / "pristine" / "libs" / "foundry" / "records" / "entities" / "scitem" / "item.xml"
+        raw_xml = cache / "raw" / "libs" / "foundry" / "records" / "entities" / "scitem" / "item.xml"
         pristine_xml.parent.mkdir(parents=True)
         raw_xml.parent.mkdir(parents=True)
         pristine_xml.write_text("<item>original</item>", encoding="utf-8")
         raw_xml.write_text("<item>removed patch value</item>", encoding="utf-8")
+        spaceship = pristine_xml.parents[1] / "spaceships" / "ship.xml"
+        spaceship.parent.mkdir()
+        spaceship.write_text("<ship/>", encoding="utf-8")
         (cache / ".dataforge_identity.json").write_text(
             json.dumps({"schema_version": 2, "patch_fingerprint": "with-patch"}), encoding="utf-8"
         )
 
         assert rebuild_patched_dataforge_cache(cache, "no-patches", lambda _: None) is True
         assert raw_xml.read_text(encoding="utf-8") == "<item>original</item>"
+
+    def test_failed_health_check_preserves_live_raw_layer(self, tmp_path):
+        cache = tmp_path / "dataforge"
+        pristine = cache / "pristine" / "libs" / "foundry" / "records" / "entities" / "scitem" / "item.xml"
+        raw = cache / "raw" / "libs" / "foundry" / "records" / "entities" / "scitem" / "item.xml"
+        pristine.parent.mkdir(parents=True)
+        raw.parent.mkdir(parents=True)
+        pristine.write_text("<item>broken</item>", encoding="utf-8")
+        raw.write_text("<item>live</item>", encoding="utf-8")
+        (cache / ".dataforge_identity.json").write_text(
+            json.dumps({"schema_version": 2, "patch_fingerprint": "old"}), encoding="utf-8"
+        )
+
+        with pytest.raises(RuntimeError, match="entities/spaceships"):
+            rebuild_patched_dataforge_cache(cache, "new", lambda _: None)
+
+        assert raw.read_text(encoding="utf-8") == "<item>live</item>"
 
     def test_recovers_interrupted_raw_layer_replacement(self, tmp_path):
         cache = tmp_path / "dataforge"
@@ -563,8 +688,10 @@ class TestDataForgeCacheFreshStamp:
         cache = parent / "dataforge"
         for layer in ("pristine", "raw"):
             libs = cache / layer / "libs" / "foundry" / "records"
-            libs.mkdir(parents=True)
-            (libs / "sample.xml").write_text("<x/>", encoding="utf-8")
+            for subtree, content in (("entities/scitem", "<item/>"), ("entities/spaceships", "<ship/>")):
+                target = libs / subtree
+                target.mkdir(parents=True)
+                (target / "sample.xml").write_text(content, encoding="utf-8")
         stamp = cache / ".p4k_mtime"
         stamp.write_text(str(stamp_mtime))
         return cache
@@ -601,6 +728,17 @@ class TestDataForgeCacheFreshStamp:
         cache = tmp_path / "dataforge"
         (cache / "raw" / "libs" / "foundry" / "records").mkdir(parents=True)
         (cache / ".p4k_mtime").write_text(str(p4k.stat().st_mtime))
+
+        assert dataforge_cache_is_fresh(p4k, cache) is False
+
+    def test_stale_when_required_subtree_is_missing(self, tmp_path):
+        mtime = 1700000000.0
+        p4k = self._make_p4k(tmp_path, mtime)
+        cache = self._make_cache_with_stamp(tmp_path, mtime)
+        self._write_identity(cache, p4k)
+        import shutil
+
+        shutil.rmtree(cache / "raw" / "libs" / "foundry" / "records" / "entities" / "spaceships")
 
         assert dataforge_cache_is_fresh(p4k, cache) is False
 
