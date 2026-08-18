@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from src.utils.resource import _resolve_patches_dir, get_resource_path
@@ -94,6 +96,57 @@ class TestDiffCategoryTranslation:
 
     def test_is_absolute(self):
         assert _resolve_patches_dir().is_absolute()
+
+
+@pytest.mark.unit
+class TestDataForgeWorkerManifest:
+    def test_snapshots_patched_cache_once(self, monkeypatch, tmp_path):
+        from src.gui.workers import DataForgeExtractWorker
+
+        events: list[str] = []
+        cache_dir = tmp_path / "dataforge"
+
+        def fake_extract(*args, **kwargs):
+            events.append("extract")
+            staging_dir = tmp_path / "staging"
+            (staging_dir / "raw" / "libs").mkdir(parents=True)
+            kwargs["finalize_callback"](staging_dir)
+
+        def fake_patches(*args, **kwargs):
+            events.append("patch")
+            return SimpleNamespace(errors=[], summary_line=lambda: "patched")
+
+        def fake_manifest(path, **kwargs):
+            assert path == tmp_path / "staging" / "raw" / "libs"
+            events.append("manifest")
+
+        monkeypatch.setattr("src.utils.pak_extractor.extract_dataforge", fake_extract)
+        monkeypatch.setattr("src.utils.dataforge_patcher.apply_patches", fake_patches)
+        monkeypatch.setattr("src.utils.dataforge_diff.update_manifest", fake_manifest)
+
+        worker = DataForgeExtractWorker(
+            tmp_path / "Data.p4k", tmp_path / "unp4k.exe", tmp_path / "unforge.exe", cache_dir
+        )
+        worker.run()
+
+        assert events == ["extract", "patch", "manifest"]
+
+
+@pytest.mark.unit
+class TestPostExtractionGeneration:
+    def test_success_forces_enhancement_regeneration(self):
+        from src.gui.main_window import MainWindow
+
+        status_bar = MagicMock()
+        fake_window = SimpleNamespace(
+            enhancements_tab=MagicMock(),
+            worker_coord=MagicMock(),
+            _status_bar=lambda: status_bar,
+        )
+
+        MainWindow._on_dataforge_extract_finished(fake_window, True)
+
+        fake_window.worker_coord.start_enhancements_generation.assert_called_once_with(force_full=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

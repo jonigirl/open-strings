@@ -20,6 +20,8 @@ import pytest
 from src.utils.pak_extractor import (
     DATAFORGE_KEEP_SUBPATHS,
     _copy_filtered_records,
+    _recover_dataforge_cache,
+    _replace_dataforge_cache,
     dataforge_cache_is_fresh,
     extract_dataforge,
     extract_global_ini,
@@ -132,6 +134,40 @@ class TestDataForgeExtraction:
                 extract_dataforge(p4k_path, os.path.join(tmpdir, "cache"))
             # subprocess.run is called at most once (the first tool invocation)
             assert mock_run.call_count <= 1
+
+    @patch("src.utils.pak_extractor._run_subprocess")
+    def test_finalizer_failure_preserves_existing_cache(self, mock_run, tmp_path):
+        p4k = tmp_path / "Data.p4k"
+        unp4k = tmp_path / "unp4k.exe"
+        unforge = tmp_path / "unforge.cli.exe"
+        cache = tmp_path / "dataforge"
+        p4k.write_bytes(b"p4k")
+        unp4k.write_bytes(b"unp4k")
+        unforge.write_bytes(b"unforge")
+        (cache / "raw" / "libs").mkdir(parents=True)
+        (cache / "old.xml").write_text("old", encoding="utf-8")
+
+        def fake_run(args, cwd=None, timeout=None):
+            if args[-1] == ".dcb":
+                dcb = Path(cwd) / "Data" / "Game2.dcb"
+                dcb.parent.mkdir(parents=True)
+                dcb.write_bytes(b"dcb")
+            else:
+                records = Path(args[1]).parent / "libs" / "foundry" / "records" / "entities" / "scitem"
+                records.mkdir(parents=True)
+                (records / "item.xml").write_text("<item/>", encoding="utf-8")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = fake_run
+
+        def fail_finalizer(_):
+            raise RuntimeError("patch failed")
+
+        with pytest.raises(RuntimeError, match="patch failed"):
+            extract_dataforge(p4k, unp4k, unforge, cache, finalize_callback=fail_finalizer)
+
+        assert (cache / "old.xml").read_text(encoding="utf-8") == "old"
+        assert not list(tmp_path.glob(".dataforge.staging-*"))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -287,6 +323,81 @@ class TestCopyFilteredRecords:
 
         with pytest.raises(FileNotFoundError):
             _copy_filtered_records(src / "libs", tmp_path / "dst" / "libs")
+
+
+@pytest.mark.unit
+class TestAtomicCacheReplacement:
+    def test_replaces_old_cache_with_staged_cache(self, tmp_path):
+        cache = tmp_path / "dataforge"
+        staging = tmp_path / ".dataforge.staging"
+        cache.mkdir()
+        (cache / "old.xml").write_text("old", encoding="utf-8")
+        staging.mkdir()
+        (staging / "new.xml").write_text("new", encoding="utf-8")
+
+        _replace_dataforge_cache(staging, cache)
+
+        assert not staging.exists()
+        assert not (cache / "old.xml").exists()
+        assert (cache / "new.xml").read_text(encoding="utf-8") == "new"
+
+    def test_restores_old_cache_when_staged_swap_fails(self, tmp_path, monkeypatch):
+        cache = tmp_path / "dataforge"
+        staging = tmp_path / ".dataforge.staging"
+        cache.mkdir()
+        (cache / "old.xml").write_text("old", encoding="utf-8")
+        staging.mkdir()
+        (staging / "new.xml").write_text("new", encoding="utf-8")
+
+        original_replace = Path.replace
+
+        def fail_staged_swap(source, target):
+            if source == staging:
+                raise OSError("swap failed")
+            return original_replace(source, target)
+
+        monkeypatch.setattr(Path, "replace", fail_staged_swap)
+        monkeypatch.setattr("src.utils.pak_extractor.time.sleep", lambda _: None)
+
+        with pytest.raises(OSError, match="swap failed"):
+            _replace_dataforge_cache(staging, cache)
+
+        assert (cache / "old.xml").read_text(encoding="utf-8") == "old"
+        assert (staging / "new.xml").read_text(encoding="utf-8") == "new"
+
+    def test_recovers_stranded_backup_when_live_cache_is_missing(self, tmp_path):
+        cache = tmp_path / "dataforge"
+        backup = tmp_path / ".dataforge.backup-interrupted"
+        backup.mkdir()
+        (backup / "old.xml").write_text("old", encoding="utf-8")
+
+        _recover_dataforge_cache(cache)
+
+        assert (cache / "old.xml").read_text(encoding="utf-8") == "old"
+        assert not backup.exists()
+
+    def test_retries_transient_staged_swap_failure(self, tmp_path, monkeypatch):
+        cache = tmp_path / "dataforge"
+        staging = tmp_path / ".dataforge.staging"
+        cache.mkdir()
+        staging.mkdir()
+        (staging / "new.xml").write_text("new", encoding="utf-8")
+        original_replace = Path.replace
+        attempts = {"staging": 0}
+
+        def fail_once(source, target):
+            if source == staging and attempts["staging"] == 0:
+                attempts["staging"] += 1
+                raise OSError("temporary lock")
+            return original_replace(source, target)
+
+        monkeypatch.setattr(Path, "replace", fail_once)
+        monkeypatch.setattr("src.utils.pak_extractor.time.sleep", lambda _: None)
+
+        _replace_dataforge_cache(staging, cache)
+
+        assert attempts["staging"] == 1
+        assert (cache / "new.xml").exists()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

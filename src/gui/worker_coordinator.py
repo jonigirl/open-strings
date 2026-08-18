@@ -297,7 +297,7 @@ class WorkerCoordinator(QObject):
         else:
             self.start_dataforge_extraction()
 
-    def start_enhancements_generation(self, categories: set[str] | None = None) -> None:
+    def start_enhancements_generation(self, categories: set[str] | None = None, force_full: bool = False) -> None:
         """Launch EnhancementsGeneratorWorker in the background.
 
         No-ops if a generation is already running.
@@ -319,7 +319,7 @@ class WorkerCoordinator(QObject):
         )
         dialog = self._enhancements_progress_dialog
 
-        self._enhancements_worker = EnhancementsGeneratorWorker(categories=categories)
+        self._enhancements_worker = EnhancementsGeneratorWorker(categories=categories, force_full=force_full)
         worker = self._enhancements_worker
         worker.progress.connect(self.enhancements_operation_progress)
         worker.progress.connect(self._parent.status_bar_mgr.show_message)

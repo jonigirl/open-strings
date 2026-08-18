@@ -17,6 +17,7 @@ Usage:
   python scripts/generate_enhancements_ini.py [base_ini_path [dataforge_cache_dir]]
 """
 
+import json
 import logging
 import pickle
 import re
@@ -184,7 +185,8 @@ def write_ini(path: Path, entries: dict[str, str]) -> None:
 #     a bare dict and would crash the new 2-tuple consumer.
 _LOOKUP_VERSIONS: dict[str, str] = {
     "blueprint_pools": "v8",
-    "scitem_lookups": "v4",
+    "scitem_lookups": "v5",
+    "component_tag_fallbacks": "v1",
 }
 
 
@@ -414,6 +416,21 @@ _ITEM_TYPE_ABBREV: dict[str, str] = {
 }
 
 
+def _record_tag_fallback(
+    fallbacks: dict[str, dict[str, dict[str, object]]],
+    kind: str,
+    value: str,
+    token: str,
+    source: str | None,
+) -> None:
+    entries = fallbacks[kind]
+    record = entries.setdefault(value, {"token": token, "count": 0, "sources": []})
+    record["count"] = int(record["count"]) + 1
+    sources = record["sources"]
+    if source and source not in sources and len(sources) < 5:
+        sources.append(source)
+
+
 def _derive_tag_token(raw: str) -> str:
     """Create a compact 3-letter token for new component classes/types."""
     cleaned = re.sub(r"[^A-Za-z]+", " ", raw).strip()
@@ -429,7 +446,12 @@ def _derive_tag_token(raw: str) -> str:
     return token if token else "UNK"
 
 
-def _component_name_tag(desc_value: str, root: ET.Element | None = None) -> str | None:
+def _component_name_tag(
+    desc_value: str,
+    root: ET.Element | None = None,
+    report_source: str | None = None,
+    fallbacks: dict[str, dict[str, dict[str, object]]] | None = None,
+) -> str | None:
     """Build a bracket annotation tag from a component-style description.
 
     Two paths, both producing the same [...] shape:
@@ -457,7 +479,11 @@ def _component_name_tag(desc_value: str, root: ET.Element | None = None) -> str 
     class_m = re.search(r"Class:\s*(\w+)", desc_value)
     if size_m and grade_m and class_m:
         class_name = class_m.group(1).strip()
-        abbrev = _CLASS_ABBREV.get(class_name) or _derive_tag_token(class_name)
+        abbrev = _CLASS_ABBREV.get(class_name)
+        if abbrev is None:
+            abbrev = _derive_tag_token(class_name)
+            if fallbacks is not None:
+                _record_tag_fallback(fallbacks, "class", class_name, abbrev, report_source)
         return f"[{abbrev}-S{size_m.group(1)}-{grade_m.group(1)}]"
 
     # Fallback path — mining heads / lasers write "Size: S0" / "Size: S00";
@@ -468,7 +494,11 @@ def _component_name_tag(desc_value: str, root: ET.Element | None = None) -> str 
     size_str = size_fb.group(1)
     type_m = re.search(r"Item Type:\s*([^\\\n]+)", desc_value)
     type_name = type_m.group(1).strip() if type_m else ""
-    type_abbrev = _ITEM_TYPE_ABBREV.get(type_name) or (_derive_tag_token(type_name) if type_name else None)
+    type_abbrev = _ITEM_TYPE_ABBREV.get(type_name)
+    if type_abbrev is None and type_name:
+        type_abbrev = _derive_tag_token(type_name)
+        if fallbacks is not None:
+            _record_tag_fallback(fallbacks, "item_type", type_name, type_abbrev, report_source)
     # Re-use grade_m from the strict path (pattern unchanged).
     if type_abbrev and grade_m:
         return f"[{type_abbrev}-S{size_str}-{grade_m.group(1)}]"
@@ -2188,6 +2218,26 @@ def build_scitem_lookups(
     return mag_lookup, entity_names, entity_names_by_filename, entity_name_tags
 
 
+def collect_component_tag_fallbacks(scitem_dir: Path, loc: dict[str, str]) -> dict[str, dict[str, dict[str, object]]]:
+    """Collect unknown component tag metadata once per DataForge cache version."""
+    fallbacks: dict[str, dict[str, dict[str, object]]] = {"class": {}, "item_type": {}}
+    if not scitem_dir.exists():
+        return fallbacks
+    for xml_file in scitem_dir.rglob("*.xml"):
+        try:
+            root = ET.parse(xml_file).getroot()
+        except ET.ParseError:
+            continue
+        desc_key = _loc_key(root)
+        if desc_key and (desc_value := loc.get(desc_key)):
+            _component_name_tag(
+                desc_value,
+                report_source=str(xml_file.relative_to(scitem_dir)),
+                fallbacks=fallbacks,
+            )
+    return fallbacks
+
+
 def build_magazine_lookup(scitem_dir: Path) -> dict[str, tuple[str, str]]:
     """Back-compat wrapper around build_scitem_lookups — returns magazines only."""
     mag_lookup, _, _, _ = build_scitem_lookups(scitem_dir)
@@ -2362,6 +2412,12 @@ def main(
         raise FileNotFoundError(
             f"DataForge cache not found at {forge_dir}\nRun 'Extract DataForge' in the app first (Enhancements tab)."
         )
+
+    tag_fallbacks = _cached_lookup(
+        forge_dir,
+        "component_tag_fallbacks",
+        lambda: collect_component_tag_fallbacks(records / "entities" / "scitem", loc),
+    )
 
     # ── Estimate total phases for determinate progress ────────────────────────
     # One tick per logical phase. The sink caps at total, so over-counting is
@@ -3266,6 +3322,11 @@ def main(
     for enhancement_key, file_name in ENHANCEMENT_OUTPUT_FILES.items():
         if _want(enhancement_key):
             write_ini(output_dir / file_name, outputs_by_key[enhancement_key])
+
+    report_path = output_dir / "dataforge_compatibility_report.json"
+    report_path.write_text(json.dumps({"tag_fallbacks": tag_fallbacks}, indent=2), encoding="utf-8")
+    fallback_count = sum(len(values) for values in tag_fallbacks.values())
+    logger.info(f"Compatibility report: {fallback_count} unknown tag value(s) → {report_path}")
 
     total = sum(len(v) for k, v in outputs_by_key.items() if _want(k))
     logger.info(f"Done — {total:,} total stat entries written to {output_dir}")

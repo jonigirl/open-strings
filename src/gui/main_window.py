@@ -1354,7 +1354,7 @@ class MainWindow(QMainWindow):
         status_bar = self._status_bar()
         if success:
             status_bar.showMessage("DataForge extracted — generating enhancements…")
-            self.worker_coord.start_enhancements_generation()
+            self.worker_coord.start_enhancements_generation(force_full=True)
         else:
             self.enhancements_tab.set_operation_idle()
             status_bar.showMessage("DataForge extraction failed — check the Log tab for details")

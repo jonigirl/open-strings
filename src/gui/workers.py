@@ -214,11 +214,13 @@ class EnhancementsGeneratorWorker(QThread):
     finished = pyqtSignal(bool)
     error = pyqtSignal(str)
 
-    def __init__(self, categories: set[str] | None = None) -> None:
+    def __init__(self, categories: set[str] | None = None, force_full: bool = False) -> None:
         super().__init__()
         self.categories = categories
+        self.force_full = force_full
 
     def run(self) -> None:
+        from src.utils.dataforge_diff import update_manifest
         from src.utils.dataforge_patcher import apply_patches
 
         try:
@@ -233,13 +235,26 @@ class EnhancementsGeneratorWorker(QThread):
             base_ini = AppSettings.get_cache_dir() / "base.ini"
             forge_dir = AppSettings.get_dataforge_cache_dir()
 
+            # Apply patches before checking for dirty files, so newly added
+            # patch rules are included in the generation decision.
+            self.progress_pct.emit(0, 0, "Applying DataForge patches…")
+            self.progress.emit("Applying DataForge patches…")
+            patch_report = apply_patches(
+                _resolve_patches_dir(),
+                forge_dir,
+                progress_callback=self.progress.emit,
+            )
+            logger.info(f"DataForge patches: {patch_report.summary_line()}")
+            if patch_report.errors:
+                for err in patch_report.errors:
+                    logger.warning(f"  patch error: {err}")
             # ── Diff-cache check ──────────────────────────────────────────────
             # Compare the current DataForge XMLs against the last-run manifest.
             # None  → no manifest yet, run everything.
             # set() → nothing changed, skip entirely.
             # {...} → only re-run the categories whose source XMLs changed.
             libs_dir = forge_dir / "raw" / "libs"
-            diff = dirty_categories(libs_dir)
+            diff = None if self.force_full else dirty_categories(libs_dir)
             # If any enabled enhancement files are missing, force a full
             # regeneration — even if the manifest reports some or all categories
             # as clean.  This handles first-run after a fresh install, and the
@@ -268,24 +283,6 @@ class EnhancementsGeneratorWorker(QThread):
                 else:
                     self.categories = set()  # nothing changed — skip all
             # ─────────────────────────────────────────────────────────────────
-
-            # Re-apply DataForge patches before generation. apply_patches is
-            # idempotent: already-patched files are a cheap no-op, so running
-            # this every regen picks up newly-added patches without forcing
-            # the user through a full re-extract. Bar stays indeterminate
-            # here — ``mod.main()`` below takes over with determinate ticks
-            # once its ProgressSink is wired up.
-            self.progress_pct.emit(0, 0, "Applying DataForge patches…")
-            self.progress.emit("Applying DataForge patches…")
-            patch_report = apply_patches(
-                _resolve_patches_dir(),
-                forge_dir,
-                progress_callback=self.progress.emit,
-            )
-            logger.info(f"DataForge patches: {patch_report.summary_line()}")
-            if patch_report.errors:
-                for err in patch_report.errors:
-                    logger.warning(f"  patch error: {err}")
 
             self.progress.emit("Loading enhancements generator...")
 
@@ -319,6 +316,14 @@ class EnhancementsGeneratorWorker(QThread):
                 progress_callback=_on_progress,
                 patches_dir=_resolve_patches_dir(),
             )
+            if not self.force_full and (diff is None or (diff and not (translated - self.categories))):
+                self.progress.emit("Snapshotting patched DataForge cache…")
+                update_manifest(
+                    libs_dir,
+                    progress_callback=lambda completed, total, message: self.progress_pct.emit(
+                        completed, total, message
+                    ),
+                )
             logger.info("Enhancements generation worker: mod.main() completed successfully")
 
             self.finished.emit(True)
@@ -387,11 +392,29 @@ class DataForgeExtractWorker(QThread):
     def run(self) -> None:
         import threading as _threading
 
+        from src.utils.dataforge_diff import update_manifest
         from src.utils.dataforge_patcher import apply_patches
         from src.utils.pak_extractor import extract_dataforge
 
         self._thread_id = _threading.get_ident()
         try:
+
+            def _finalize_staged_cache(staging_dir: Path) -> None:
+                self.progress_pct.emit(0, 0, "Applying DataForge patches…")
+                self.progress.emit("Applying DataForge patches…")
+                report = apply_patches(_resolve_patches_dir(), staging_dir, progress_callback=self.progress.emit)
+                logger.info(f"DataForge patches: {report.summary_line()}")
+                if report.errors:
+                    for err in report.errors:
+                        logger.warning(f"  patch error: {err}")
+                self.progress.emit("Snapshotting patched DataForge cache…")
+                update_manifest(
+                    staging_dir / "raw" / "libs",
+                    progress_callback=lambda completed, total, message: self.progress_pct.emit(
+                        completed, total, message
+                    ),
+                )
+
             extract_dataforge(
                 self._p4k,
                 self._unp4k_exe,
@@ -399,26 +422,8 @@ class DataForgeExtractWorker(QThread):
                 self._cache_dir,
                 progress_callback=self.progress.emit,
                 progress_pct_callback=lambda c, t, m: self.progress_pct.emit(c, t, m),
+                finalize_callback=_finalize_staged_cache,
             )
-            # Apply declarative patches over known CIG data bugs so downstream
-            # consumers (enhancement generator, future tooling) see corrected
-            # data. Patch failures are recorded in the report but don't block
-            # the pipeline.
-            #
-            # Flip the progress bar back to indeterminate (range 0-0, auto-
-            # animating) so the user can see we're still working — after
-            # extract_dataforge completes, the bar sits at its final 3/3
-            # "Done" determinate state, which would look like the dialog is
-            # about to close. The patches phase has no useful per-file
-            # progress, so indeterminate is the honest signal.
-            self.progress_pct.emit(0, 0, "Applying DataForge patches…")
-            self.progress.emit("Applying DataForge patches…")
-            patch_root = _resolve_patches_dir()
-            report = apply_patches(patch_root, self._cache_dir, progress_callback=self.progress.emit)
-            logger.info(f"DataForge patches: {report.summary_line()}")
-            if report.errors:
-                for err in report.errors:
-                    logger.warning(f"  patch error: {err}")
             self.finished.emit(True)
         except Exception as e:
             logger.exception(f"DataForge extraction failed: {e}")

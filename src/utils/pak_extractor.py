@@ -6,9 +6,11 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
+import uuid
+from collections.abc import Callable
 from pathlib import Path
 
-from src.utils.dataforge_diff import update_manifest
 from src.utils.file_utils import robust_rmtree
 from src.utils.perf import timed
 
@@ -106,6 +108,58 @@ def _copy_filtered_records(src_libs: Path, dst_libs: Path) -> tuple[int, int]:
         copied += 1
 
     return copied, skipped
+
+
+def _replace_dataforge_cache(staging_dir: Path, cache_dir: Path) -> None:
+    """Replace *cache_dir* with a complete staged cache, restoring it on swap failure."""
+    backup_dir = cache_dir.with_name(f".{cache_dir.name}.backup-{uuid.uuid4().hex}")
+    had_cache = cache_dir.exists()
+    try:
+        if had_cache:
+            _replace_with_retry(cache_dir, backup_dir)
+        _replace_with_retry(staging_dir, cache_dir)
+    except OSError:
+        if had_cache and backup_dir.exists() and not cache_dir.exists():
+            _replace_with_retry(backup_dir, cache_dir)
+        raise
+    if backup_dir.exists():
+        try:
+            robust_rmtree(backup_dir)
+        except OSError:
+            logger.warning("DataForge cache backup remains after successful replacement: %s", backup_dir)
+
+
+def _replace_with_retry(source: Path, target: Path, attempts: int = 6) -> None:
+    """Rename a directory with bounded retries for transient Windows locks."""
+    last_error: OSError | None = None
+    for attempt in range(attempts):
+        try:
+            source.replace(target)
+            return
+        except OSError as exc:
+            last_error = exc
+            if attempt == attempts - 1:
+                break
+            delay = min(0.2 * (2**attempt), 3.0)
+            logger.warning("rename %s -> %s failed (%s); retrying in %.1fs", source, target, exc, delay)
+            time.sleep(delay)
+    raise last_error if last_error else OSError(f"Failed to rename {source} to {target}")
+
+
+def _recover_dataforge_cache(cache_dir: Path) -> None:
+    """Restore the newest stranded cache backup when an interrupted swap left no live cache."""
+    if cache_dir.exists():
+        return
+    backups = sorted(
+        cache_dir.parent.glob(f".{cache_dir.name}.backup-*"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    if not backups:
+        return
+    backup = backups[0]
+    logger.warning("Restoring DataForge cache from interrupted replacement backup: %s", backup)
+    _replace_with_retry(backup, cache_dir)
 
 
 def _run_subprocess(
@@ -238,6 +292,7 @@ def extract_dataforge(
     dataforge_cache_dir: Path,
     progress_callback=None,
     progress_pct_callback=None,
+    finalize_callback: Callable[[Path], None] | None = None,
 ) -> bool:
     """Extract DataForge entity XMLs from Data.p4k and cache them.
 
@@ -268,6 +323,8 @@ def extract_dataforge(
             raise FileNotFoundError(f"{name} not found at: {exe}")
     if not p4k_path.exists():
         raise FileNotFoundError(f"Data.p4k not found at: {p4k_path}")
+
+    _recover_dataforge_cache(dataforge_cache_dir)
 
     TOTAL_PHASES = 3
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
@@ -354,41 +411,34 @@ def extract_dataforge(
         if progress_pct_callback:
             progress_pct_callback(2, TOTAL_PHASES, "Caching entity files…")
 
-        # Blow away any prior cache. Uses a retry loop because on Windows
-        # (particularly under OneDrive) a transient handle from the
-        # just-exited unforge.exe or from the OneDrive/Defender/indexer
-        # stack can reject the first few rmdir attempts with WinError 5.
-        if dataforge_cache_dir.exists():
-            robust_rmtree(dataforge_cache_dir)
-        dataforge_cache_dir.mkdir(parents=True, exist_ok=True)
+        staging_dir = dataforge_cache_dir.with_name(f".{dataforge_cache_dir.name}.staging-{uuid.uuid4().hex}")
+        if staging_dir.exists():
+            robust_rmtree(staging_dir)
+        staging_dir.mkdir(parents=True, exist_ok=True)
 
         # Cache only the subtrees the enhancement generator actually reads.
         # See DATAFORGE_KEEP_SUBPATHS for the list and rationale — dropping
         # the unused ~30k/~1 GB worth of entries halves cache file count and
         # makes every re-extract + clear-cache noticeably faster on the
         # OneDrive/Defender/Indexer-burdened Windows paths our users live in.
-        raw_dir = dataforge_cache_dir / "raw"
-        logger.info(f"Saving DataForge extraction to {raw_dir}…")
-        copied, skipped = _copy_filtered_records(libs_dir / "libs", raw_dir / "libs")
-        logger.info(
-            f"DataForge cache written: {copied}/{len(DATAFORGE_KEEP_SUBPATHS)} "
-            f"keep-subpaths copied ({skipped} not present in this build)"
-        )
+        try:
+            raw_dir = staging_dir / "raw"
+            logger.info(f"Saving staged DataForge extraction to {raw_dir}…")
+            copied, skipped = _copy_filtered_records(libs_dir / "libs", raw_dir / "libs")
+            logger.info(
+                f"DataForge staging cache written: {copied}/{len(DATAFORGE_KEEP_SUBPATHS)} "
+                f"keep-subpaths copied ({skipped} not present in this build)"
+            )
 
-        # Write a stamp so we know when this was extracted (p4k mtime)
-        stamp = dataforge_cache_dir / ".p4k_mtime"
-        stamp.write_text(str(p4k_path.stat().st_mtime))
-        logger.info(f"DataForge cache written to {dataforge_cache_dir}")
-
-        # Snapshot the new cache so the next run can diff against it.
-        # SHA-256 over ~28k files is multi-minute serial; we surface it
-        # to the progress bar via progress_pct_callback.
-        logger.info("Snapshotting DataForge cache for diff manifest…")
-        update_manifest(
-            raw_dir / "libs",
-            progress_callback=progress_pct_callback,
-        )
-        logger.info("Diff manifest written")
+            # Write a stamp so we know when this was extracted (p4k mtime).
+            (staging_dir / ".p4k_mtime").write_text(str(p4k_path.stat().st_mtime))
+            if finalize_callback is not None:
+                finalize_callback(staging_dir)
+            _replace_dataforge_cache(staging_dir, dataforge_cache_dir)
+            logger.info(f"DataForge cache written to {dataforge_cache_dir}")
+        finally:
+            if staging_dir.exists():
+                robust_rmtree(staging_dir)
 
     if progress_pct_callback:
         progress_pct_callback(3, TOTAL_PHASES, "Done")
@@ -411,6 +461,12 @@ def dataforge_cache_is_fresh(p4k_path: Path | str, dataforge_cache_dir: Path | s
     if legacy_order:
         p4k_path = legacy_cache_dir
         dataforge_cache_dir = legacy_p4k_path
+
+    try:
+        _recover_dataforge_cache(dataforge_cache_dir)
+    except OSError:
+        logger.warning("Could not restore interrupted DataForge cache replacement", exc_info=True)
+        return False
 
     stamp = dataforge_cache_dir / ".p4k_mtime"
     libs_dir = dataforge_cache_dir / "raw" / "libs"

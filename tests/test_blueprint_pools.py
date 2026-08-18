@@ -251,6 +251,25 @@ class TestBlueprintNameTags:
         type_desc = "Size: S0\nItem Type: Survey Scanner\nGrade: B"
         assert gen_module._component_name_tag(type_desc) == "[SUR-S0-B]"
 
+    def test_tagger_records_unknown_metadata_for_compatibility_report(self, gen_module):
+        fallbacks = {"class": {}, "item_type": {}}
+
+        tag = gen_module._component_name_tag(
+            "Size: S1\nItem Type: Quantum Survey Array\nGrade: A",
+            report_source="ships/survey_array.xml",
+            fallbacks=fallbacks,
+        )
+
+        assert tag == "[QUA-S1-A]"
+        assert fallbacks["item_type"] == {
+            "Quantum Survey Array": {
+                "token": "QUA",
+                "count": 1,
+                "sources": ["ships/survey_array.xml"],
+            }
+        }
+        assert fallbacks["class"] == {}
+
     def test_tagger_fallback_mining_laser_size_only(self, gen_module):
         """Mining head with S-prefix size + Item Type but no Grade → [TYPE-Sx]."""
         desc = "Size: S0\nItem Type: Mining Laser"
