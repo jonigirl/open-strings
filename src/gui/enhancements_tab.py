@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from src.utils.resource import _resolve_patches_dir
 from src.utils.settings import AppSettings
 
 logger = logging.getLogger(__name__)
@@ -312,10 +313,24 @@ class EnhancementsTab(QWidget):
         if not (forge_dir / ".p4k_mtime").exists():
             self._forge_status_label.setText("DataForge: not yet extracted — click 'Generate Enhancements' to begin")
             self._forge_status_label.setStyleSheet("font-size: 10px; color: #f44336;")
-        elif p4k_path.exists() and not dataforge_cache_is_fresh(p4k_path, forge_dir):
+        elif p4k_path.exists() and not dataforge_cache_is_fresh(
+            p4k_path,
+            forge_dir,
+            AppSettings.get_unp4k_exe_path(),
+            AppSettings.get_unforge_exe_path(),
+        ):
             self._forge_status_label.setText(
                 "DataForge: cache outdated — click 'Generate Enhancements' to re-extract and update"
             )
+            self._forge_status_label.setStyleSheet("font-size: 10px; color: #ff9800;")
+        elif p4k_path.exists() and not dataforge_cache_is_fresh(
+            p4k_path,
+            forge_dir,
+            AppSettings.get_unp4k_exe_path(),
+            AppSettings.get_unforge_exe_path(),
+            _resolve_patches_dir(),
+        ):
+            self._forge_status_label.setText("DataForge: patches changed — click 'Generate Enhancements' to refresh")
             self._forge_status_label.setStyleSheet("font-size: 10px; color: #ff9800;")
         else:
             self._forge_status_label.setText("DataForge: cache up to date ✓")

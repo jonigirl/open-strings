@@ -222,6 +222,7 @@ class EnhancementsGeneratorWorker(QThread):
     def run(self) -> None:
         from src.utils.dataforge_diff import update_manifest
         from src.utils.dataforge_patcher import apply_patches
+        from src.utils.pak_extractor import patch_set_fingerprint, rebuild_patched_dataforge_cache
 
         try:
             if getattr(sys, "frozen", False):
@@ -234,27 +235,37 @@ class EnhancementsGeneratorWorker(QThread):
 
             base_ini = AppSettings.get_cache_dir() / "base.ini"
             forge_dir = AppSettings.get_dataforge_cache_dir()
+            patch_fingerprint = patch_set_fingerprint(_resolve_patches_dir())
 
-            # Apply patches before checking for dirty files, so newly added
-            # patch rules are included in the generation decision.
-            self.progress_pct.emit(0, 0, "Applying DataForge patches…")
-            self.progress.emit("Applying DataForge patches…")
-            patch_report = apply_patches(
-                _resolve_patches_dir(),
-                forge_dir,
-                progress_callback=self.progress.emit,
-            )
-            logger.info(f"DataForge patches: {patch_report.summary_line()}")
-            if patch_report.errors:
-                for err in patch_report.errors:
-                    logger.warning(f"  patch error: {err}")
+            def _apply_patches(cache_dir: Path) -> None:
+                self.progress_pct.emit(0, 0, "Applying DataForge patches…")
+                self.progress.emit("Applying DataForge patches…")
+                report = apply_patches(_resolve_patches_dir(), cache_dir, progress_callback=self.progress.emit)
+                logger.info(f"DataForge patches: {report.summary_line()}")
+                if report.errors:
+                    for err in report.errors:
+                        logger.warning(f"  patch error: {err}")
+
+            def _finalize_patched_cache(cache_dir: Path) -> None:
+                _apply_patches(cache_dir)
+                self.progress.emit("Snapshotting patched DataForge cache…")
+                update_manifest(
+                    cache_dir / "raw" / "libs",
+                    progress_callback=lambda completed, total, message: self.progress_pct.emit(
+                        completed, total, message
+                    ),
+                )
+
+            patched_rebuilt = rebuild_patched_dataforge_cache(forge_dir, patch_fingerprint, _finalize_patched_cache)
+            if not patched_rebuilt:
+                _apply_patches(forge_dir)
             # ── Diff-cache check ──────────────────────────────────────────────
             # Compare the current DataForge XMLs against the last-run manifest.
             # None  → no manifest yet, run everything.
             # set() → nothing changed, skip entirely.
             # {...} → only re-run the categories whose source XMLs changed.
             libs_dir = forge_dir / "raw" / "libs"
-            diff = None if self.force_full else dirty_categories(libs_dir)
+            diff = None if self.force_full or patched_rebuilt else dirty_categories(libs_dir)
             # If any enabled enhancement files are missing, force a full
             # regeneration — even if the manifest reports some or all categories
             # as clean.  This handles first-run after a fresh install, and the
@@ -316,7 +327,11 @@ class EnhancementsGeneratorWorker(QThread):
                 progress_callback=_on_progress,
                 patches_dir=_resolve_patches_dir(),
             )
-            if not self.force_full and (diff is None or (diff and not (translated - self.categories))):
+            if (
+                not self.force_full
+                and not patched_rebuilt
+                and (diff is None or (diff and not (translated - self.categories)))
+            ):
                 self.progress.emit("Snapshotting patched DataForge cache…")
                 update_manifest(
                     libs_dir,
@@ -394,7 +409,7 @@ class DataForgeExtractWorker(QThread):
 
         from src.utils.dataforge_diff import update_manifest
         from src.utils.dataforge_patcher import apply_patches
-        from src.utils.pak_extractor import extract_dataforge
+        from src.utils.pak_extractor import extract_dataforge, patch_set_fingerprint
 
         self._thread_id = _threading.get_ident()
         try:
@@ -423,6 +438,7 @@ class DataForgeExtractWorker(QThread):
                 progress_callback=self.progress.emit,
                 progress_pct_callback=lambda c, t, m: self.progress_pct.emit(c, t, m),
                 finalize_callback=_finalize_staged_cache,
+                patch_fingerprint=patch_set_fingerprint(_resolve_patches_dir()),
             )
             self.finished.emit(True)
         except Exception as e:

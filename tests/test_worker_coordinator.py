@@ -287,6 +287,22 @@ class TestDataforgeExtraction:
 
 
 class TestEnhancementsGeneration:
+    def test_patch_only_staleness_starts_generation_without_extraction(self, qtbot):
+        coord, _ = _make_coordinator(qtbot)
+        coord.start_enhancements_generation = MagicMock()
+        coord.start_dataforge_extraction = MagicMock()
+
+        def immutable_cache_is_fresh(*args, **kwargs):
+            assert len(args) == 4
+            assert kwargs == {}
+            return True
+
+        with patch("src.utils.pak_extractor.dataforge_cache_is_fresh", side_effect=immutable_cache_is_fresh):
+            coord.start_enhancements_pipeline()
+
+        coord.start_enhancements_generation.assert_called_once_with()
+        coord.start_dataforge_extraction.assert_not_called()
+
     def test_enhancements_finished_signal(self, qtbot):
         coord, _ = _make_coordinator(qtbot)
         coord._enhancements_worker = _mock_worker()

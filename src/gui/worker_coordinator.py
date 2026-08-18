@@ -292,7 +292,12 @@ class WorkerCoordinator(QObject):
         forge_dir = AppSettings.get_dataforge_cache_dir()
         p4k_path = AppSettings.get_p4k_path()
 
-        if dataforge_cache_is_fresh(p4k_path, forge_dir):
+        if dataforge_cache_is_fresh(
+            p4k_path,
+            forge_dir,
+            AppSettings.get_unp4k_exe_path(),
+            AppSettings.get_unforge_exe_path(),
+        ):
             self.start_enhancements_generation()
         else:
             self.start_dataforge_extraction()

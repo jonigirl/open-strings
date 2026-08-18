@@ -10,6 +10,7 @@ Covers:
 - extract_global_ini happy path and error paths
 """
 
+import json
 import os
 import stat
 import tempfile
@@ -18,13 +19,17 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from src.utils.pak_extractor import (
+    DATAFORGE_CACHE_SCHEMA_VERSION,
     DATAFORGE_KEEP_SUBPATHS,
     _copy_filtered_records,
+    _read_dataforge_identity,
     _recover_dataforge_cache,
+    _recover_dataforge_layer,
     _replace_dataforge_cache,
     dataforge_cache_is_fresh,
     extract_dataforge,
     extract_global_ini,
+    rebuild_patched_dataforge_cache,
     robust_rmtree,
 )
 
@@ -33,8 +38,8 @@ from src.utils.pak_extractor import (
 class TestDataForgeCache:
     """DataForge cache freshness detection."""
 
-    def test_cache_is_fresh_when_newer(self):
-        """Test that cache is fresh when it's newer than p4k"""
+    def test_legacy_cache_is_stale_even_when_newer(self):
+        """A legacy one-layer cache must migrate through a fresh extraction."""
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create dummy p4k with old mtime
             p4k_path = os.path.join(tmpdir, "Data.p4k")
@@ -51,9 +56,9 @@ class TestDataForgeCache:
             recent_time = 9999999999  # Far future
             os.utime(cache_dir, (recent_time, recent_time))
 
-            # Cache should be fresh (newer than p4k)
+            # Directory mtime alone cannot validate the two-layer cache contract.
             is_fresh = dataforge_cache_is_fresh(cache_dir, p4k_path)
-            assert is_fresh is True
+            assert is_fresh is False
 
     def test_cache_is_stale_when_older(self):
         """Test that cache is stale when p4k is newer"""
@@ -168,6 +173,40 @@ class TestDataForgeExtraction:
 
         assert (cache / "old.xml").read_text(encoding="utf-8") == "old"
         assert not list(tmp_path.glob(".dataforge.staging-*"))
+
+    @patch("src.utils.pak_extractor._run_subprocess")
+    def test_extract_creates_pristine_and_patched_layers(self, mock_run, tmp_path):
+        p4k = tmp_path / "Data.p4k"
+        unp4k = tmp_path / "unp4k.exe"
+        unforge = tmp_path / "unforge.cli.exe"
+        cache = tmp_path / "dataforge"
+        p4k.write_bytes(b"p4k")
+        unp4k.write_bytes(b"unp4k")
+        unforge.write_bytes(b"unforge")
+
+        def fake_run(args, cwd=None, timeout=None):
+            if args[-1] == ".dcb":
+                dcb = Path(cwd) / "Data" / "Game2.dcb"
+                dcb.parent.mkdir(parents=True)
+                dcb.write_bytes(b"dcb")
+            else:
+                records = Path(args[1]).parent / "libs" / "foundry" / "records" / "entities" / "scitem"
+                records.mkdir(parents=True)
+                (records / "item.xml").write_text("<item>original</item>", encoding="utf-8")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        def finalize(staging_root):
+            patched = staging_root / "raw" / "libs" / "foundry" / "records" / "entities" / "scitem" / "item.xml"
+            patched.write_text("<item>patched</item>", encoding="utf-8")
+
+        mock_run.side_effect = fake_run
+        extract_dataforge(p4k, unp4k, unforge, cache, finalize_callback=finalize, patch_fingerprint="patches-v1")
+
+        pristine = cache / "pristine" / "libs" / "foundry" / "records" / "entities" / "scitem" / "item.xml"
+        patched = cache / "raw" / "libs" / "foundry" / "records" / "entities" / "scitem" / "item.xml"
+        assert pristine.read_text(encoding="utf-8") == "<item>original</item>"
+        assert patched.read_text(encoding="utf-8") == "<item>patched</item>"
+        assert _read_dataforge_identity(cache)["patch_fingerprint"] == "patches-v1"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -400,6 +439,67 @@ class TestAtomicCacheReplacement:
         assert (cache / "new.xml").exists()
 
 
+@pytest.mark.unit
+class TestPatchedCacheRebuild:
+    def test_rebuilds_raw_from_pristine_when_patch_set_changes(self, tmp_path):
+        cache = tmp_path / "dataforge"
+        pristine_xml = cache / "pristine" / "libs" / "foundry" / "records" / "item.xml"
+        raw_xml = cache / "raw" / "libs" / "foundry" / "records" / "item.xml"
+        pristine_xml.parent.mkdir(parents=True)
+        raw_xml.parent.mkdir(parents=True)
+        pristine_xml.write_text("<item>original</item>", encoding="utf-8")
+        raw_xml.write_text("<item>old patch</item>", encoding="utf-8")
+        (cache / ".dataforge_identity.json").write_text(
+            json.dumps({"schema_version": 2, "patch_fingerprint": "old"}), encoding="utf-8"
+        )
+
+        def finalize(staging_root):
+            staged_xml = staging_root / "raw" / "libs" / "foundry" / "records" / "item.xml"
+            staged_xml.write_text("<item>new patch</item>", encoding="utf-8")
+
+        rebuilt = rebuild_patched_dataforge_cache(cache, "new", finalize)
+
+        assert rebuilt is True
+        assert pristine_xml.read_text(encoding="utf-8") == "<item>original</item>"
+        assert raw_xml.read_text(encoding="utf-8") == "<item>new patch</item>"
+        assert _read_dataforge_identity(cache)["patch_fingerprint"] == "new"
+
+    def test_skips_rebuild_when_patch_set_is_unchanged(self, tmp_path):
+        cache = tmp_path / "dataforge"
+        (cache / ".dataforge_identity.json").parent.mkdir(parents=True)
+        (cache / ".dataforge_identity.json").write_text(
+            json.dumps({"schema_version": 2, "patch_fingerprint": "same"}), encoding="utf-8"
+        )
+
+        assert rebuild_patched_dataforge_cache(cache, "same", lambda _: pytest.fail("should not finalize")) is False
+
+    def test_patch_removal_restores_raw_from_pristine(self, tmp_path):
+        cache = tmp_path / "dataforge"
+        pristine_xml = cache / "pristine" / "libs" / "foundry" / "records" / "item.xml"
+        raw_xml = cache / "raw" / "libs" / "foundry" / "records" / "item.xml"
+        pristine_xml.parent.mkdir(parents=True)
+        raw_xml.parent.mkdir(parents=True)
+        pristine_xml.write_text("<item>original</item>", encoding="utf-8")
+        raw_xml.write_text("<item>removed patch value</item>", encoding="utf-8")
+        (cache / ".dataforge_identity.json").write_text(
+            json.dumps({"schema_version": 2, "patch_fingerprint": "with-patch"}), encoding="utf-8"
+        )
+
+        assert rebuild_patched_dataforge_cache(cache, "no-patches", lambda _: None) is True
+        assert raw_xml.read_text(encoding="utf-8") == "<item>original</item>"
+
+    def test_recovers_interrupted_raw_layer_replacement(self, tmp_path):
+        cache = tmp_path / "dataforge"
+        backup = cache / ".raw.backup-interrupted"
+        backup.mkdir(parents=True)
+        (backup / "old.xml").write_text("patched", encoding="utf-8")
+
+        _recover_dataforge_layer(cache, "raw")
+
+        assert (cache / "raw" / "old.xml").read_text(encoding="utf-8") == "patched"
+        assert not backup.exists()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # _robust_rmtree
 # ─────────────────────────────────────────────────────────────────────────────
@@ -461,24 +561,74 @@ class TestDataForgeCacheFreshStamp:
 
     def _make_cache_with_stamp(self, parent: Path, stamp_mtime: float) -> Path:
         cache = parent / "dataforge"
-        libs = cache / "raw" / "libs" / "foundry" / "records"
-        libs.mkdir(parents=True)
-        xml = libs / "sample.xml"
-        xml.write_text("<x/>", encoding="utf-8")
+        for layer in ("pristine", "raw"):
+            libs = cache / layer / "libs" / "foundry" / "records"
+            libs.mkdir(parents=True)
+            (libs / "sample.xml").write_text("<x/>", encoding="utf-8")
         stamp = cache / ".p4k_mtime"
         stamp.write_text(str(stamp_mtime))
         return cache
+
+    def _write_identity(self, cache: Path, p4k: Path, unp4k: Path | None = None, unforge: Path | None = None) -> None:
+        identity = {
+            "schema_version": DATAFORGE_CACHE_SCHEMA_VERSION,
+            "p4k": {"size": p4k.stat().st_size, "mtime_ns": p4k.stat().st_mtime_ns},
+            "tools": {},
+            "patch_fingerprint": "test",
+        }
+        if unp4k is not None and unforge is not None:
+            identity["tools"] = {
+                "unp4k": {"size": unp4k.stat().st_size, "mtime_ns": unp4k.stat().st_mtime_ns},
+                "unforge": {"size": unforge.stat().st_size, "mtime_ns": unforge.stat().st_mtime_ns},
+            }
+        (cache / ".dataforge_identity.json").write_text(json.dumps(identity), encoding="utf-8")
 
     def test_fresh_when_stamp_matches(self, tmp_path):
         mtime = 1700000000.0
         p4k = self._make_p4k(tmp_path, mtime)
         cache = self._make_cache_with_stamp(tmp_path, mtime)
+        self._write_identity(cache, p4k)
         assert dataforge_cache_is_fresh(p4k, cache) is True
 
     def test_stale_when_stamp_older(self, tmp_path):
         p4k = self._make_p4k(tmp_path, 1700000100.0)
         cache = self._make_cache_with_stamp(tmp_path, 1700000000.0)
+        self._write_identity(cache, p4k)
         assert dataforge_cache_is_fresh(p4k, cache) is False
+
+    def test_legacy_one_layer_cache_is_stale(self, tmp_path):
+        p4k = self._make_p4k(tmp_path, 1700000000.0)
+        cache = tmp_path / "dataforge"
+        (cache / "raw" / "libs" / "foundry" / "records").mkdir(parents=True)
+        (cache / ".p4k_mtime").write_text(str(p4k.stat().st_mtime))
+
+        assert dataforge_cache_is_fresh(p4k, cache) is False
+
+    def test_stale_when_extraction_tool_changes(self, tmp_path):
+        p4k = self._make_p4k(tmp_path, 1700000000.0)
+        cache = self._make_cache_with_stamp(tmp_path, p4k.stat().st_mtime)
+        unp4k = tmp_path / "unp4k.exe"
+        unforge = tmp_path / "unforge.exe"
+        unp4k.write_bytes(b"first")
+        unforge.write_bytes(b"first")
+        self._write_identity(cache, p4k, unp4k, unforge)
+        unp4k.write_bytes(b"changed")
+
+        assert dataforge_cache_is_fresh(p4k, cache, unp4k, unforge) is False
+
+    def test_stale_when_patch_set_changes(self, tmp_path):
+        p4k = self._make_p4k(tmp_path, 1700000000.0)
+        cache = self._make_cache_with_stamp(tmp_path, p4k.stat().st_mtime)
+        patches = tmp_path / "patches"
+        patches.mkdir()
+        (patches / "example.patch.json").write_text('{"edits": []}', encoding="utf-8")
+        self._write_identity(cache, p4k)
+        identity_path = cache / ".dataforge_identity.json"
+        identity = json.loads(identity_path.read_text(encoding="utf-8"))
+        identity["patch_fingerprint"] = "old"
+        identity_path.write_text(json.dumps(identity), encoding="utf-8")
+
+        assert dataforge_cache_is_fresh(p4k, cache, patch_root=patches) is False
 
     def test_stale_when_no_xml_files(self, tmp_path):
         mtime = 1700000000.0

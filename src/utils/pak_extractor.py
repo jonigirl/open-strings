@@ -1,5 +1,7 @@
 """Extracts files from Star Citizen's Data.p4k using unp4k.exe."""
 
+import hashlib
+import json
 import logging
 import shutil
 import subprocess
@@ -66,6 +68,11 @@ DATAFORGE_KEEP_SUBPATHS: tuple[str, ...] = (
     "ammoparams/fps",
     "reputation/rewards/missionrewards_reputation",
 )
+
+DATAFORGE_IDENTITY_FILE = ".dataforge_identity.json"
+DATAFORGE_CACHE_SCHEMA_VERSION = 2
+DATAFORGE_PRISTINE_DIR = "pristine"
+DATAFORGE_PATCHED_DIR = "raw"
 
 
 def _copy_filtered_records(src_libs: Path, dst_libs: Path) -> tuple[int, int]:
@@ -160,6 +167,89 @@ def _recover_dataforge_cache(cache_dir: Path) -> None:
     backup = backups[0]
     logger.warning("Restoring DataForge cache from interrupted replacement backup: %s", backup)
     _replace_with_retry(backup, cache_dir)
+
+
+def _recover_dataforge_layer(cache_dir: Path, layer: str) -> None:
+    """Restore a stranded layer backup after an interrupted in-cache replacement."""
+    target = cache_dir / layer
+    if target.exists():
+        return
+    backups = sorted(
+        cache_dir.glob(f".{layer}.backup-*"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    if not backups:
+        return
+    backup = backups[0]
+    logger.warning("Restoring DataForge %s layer from interrupted replacement backup: %s", layer, backup)
+    _replace_with_retry(backup, target)
+
+
+def _file_identity(path: Path) -> dict[str, int]:
+    stat = path.stat()
+    return {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+
+
+def patch_set_fingerprint(patch_root: Path) -> str:
+    """Return a content fingerprint for every declarative DataForge patch."""
+    digest = hashlib.sha256()
+    for patch_file in sorted(patch_root.rglob("*.patch.json")) if patch_root.exists() else []:
+        digest.update(str(patch_file.relative_to(patch_root)).encode("utf-8"))
+        digest.update(patch_file.read_bytes())
+    return digest.hexdigest()
+
+
+def _write_dataforge_identity(
+    cache_dir: Path,
+    p4k_path: Path,
+    unp4k_exe: Path,
+    unforge_exe: Path,
+    patch_fingerprint: str,
+) -> None:
+    """Write the immutable inputs and patch set that produced this cache."""
+    identity = {
+        "schema_version": DATAFORGE_CACHE_SCHEMA_VERSION,
+        "p4k": _file_identity(p4k_path),
+        "tools": {"unp4k": _file_identity(unp4k_exe), "unforge": _file_identity(unforge_exe)},
+        "patch_fingerprint": patch_fingerprint,
+    }
+    (cache_dir / DATAFORGE_IDENTITY_FILE).write_text(json.dumps(identity, sort_keys=True), encoding="utf-8")
+
+
+def _read_dataforge_identity(cache_dir: Path) -> dict | None:
+    try:
+        return json.loads((cache_dir / DATAFORGE_IDENTITY_FILE).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def rebuild_patched_dataforge_cache(
+    cache_dir: Path,
+    patch_fingerprint: str,
+    finalize_callback: Callable[[Path], None],
+) -> bool:
+    """Rebuild the patched ``raw`` tree from immutable ``pristine`` XML when patches change."""
+    _recover_dataforge_layer(cache_dir, DATAFORGE_PATCHED_DIR)
+    identity = _read_dataforge_identity(cache_dir)
+    if identity is None or identity.get("patch_fingerprint") == patch_fingerprint:
+        return False
+
+    pristine_libs = cache_dir / DATAFORGE_PRISTINE_DIR / "libs"
+    if not pristine_libs.exists():
+        raise FileNotFoundError(f"Pristine DataForge cache missing at {pristine_libs}")
+
+    staging_root = cache_dir / f".{DATAFORGE_PATCHED_DIR}.staging-{uuid.uuid4().hex}"
+    try:
+        shutil.copytree(pristine_libs, staging_root / DATAFORGE_PATCHED_DIR / "libs")
+        finalize_callback(staging_root)
+        _replace_dataforge_cache(staging_root / DATAFORGE_PATCHED_DIR, cache_dir / DATAFORGE_PATCHED_DIR)
+        identity["patch_fingerprint"] = patch_fingerprint
+        (cache_dir / DATAFORGE_IDENTITY_FILE).write_text(json.dumps(identity, sort_keys=True), encoding="utf-8")
+        return True
+    finally:
+        if staging_root.exists():
+            robust_rmtree(staging_root)
 
 
 def _run_subprocess(
@@ -293,6 +383,7 @@ def extract_dataforge(
     progress_callback=None,
     progress_pct_callback=None,
     finalize_callback: Callable[[Path], None] | None = None,
+    patch_fingerprint: str = "",
 ) -> bool:
     """Extract DataForge entity XMLs from Data.p4k and cache them.
 
@@ -422,16 +513,19 @@ def extract_dataforge(
         # makes every re-extract + clear-cache noticeably faster on the
         # OneDrive/Defender/Indexer-burdened Windows paths our users live in.
         try:
-            raw_dir = staging_dir / "raw"
-            logger.info(f"Saving staged DataForge extraction to {raw_dir}…")
-            copied, skipped = _copy_filtered_records(libs_dir / "libs", raw_dir / "libs")
+            pristine_dir = staging_dir / DATAFORGE_PRISTINE_DIR
+            raw_dir = staging_dir / DATAFORGE_PATCHED_DIR
+            logger.info(f"Saving staged pristine DataForge extraction to {pristine_dir}…")
+            copied, skipped = _copy_filtered_records(libs_dir / "libs", pristine_dir / "libs")
             logger.info(
-                f"DataForge staging cache written: {copied}/{len(DATAFORGE_KEEP_SUBPATHS)} "
+                f"DataForge pristine cache written: {copied}/{len(DATAFORGE_KEEP_SUBPATHS)} "
                 f"keep-subpaths copied ({skipped} not present in this build)"
             )
+            shutil.copytree(pristine_dir / "libs", raw_dir / "libs")
 
             # Write a stamp so we know when this was extracted (p4k mtime).
             (staging_dir / ".p4k_mtime").write_text(str(p4k_path.stat().st_mtime))
+            _write_dataforge_identity(staging_dir, p4k_path, unp4k_exe, unforge_exe, patch_fingerprint)
             if finalize_callback is not None:
                 finalize_callback(staging_dir)
             _replace_dataforge_cache(staging_dir, dataforge_cache_dir)
@@ -446,7 +540,13 @@ def extract_dataforge(
 
 
 @timed
-def dataforge_cache_is_fresh(p4k_path: Path | str, dataforge_cache_dir: Path | str) -> bool:
+def dataforge_cache_is_fresh(
+    p4k_path: Path | str,
+    dataforge_cache_dir: Path | str,
+    unp4k_exe: Path | str | None = None,
+    unforge_exe: Path | str | None = None,
+    patch_root: Path | str | None = None,
+) -> bool:
     """Return True if the cached DataForge XMLs are up-to-date with the p4k.
 
     Requires both a matching mtime stamp AND actual XML content in the cache
@@ -464,24 +564,31 @@ def dataforge_cache_is_fresh(p4k_path: Path | str, dataforge_cache_dir: Path | s
 
     try:
         _recover_dataforge_cache(dataforge_cache_dir)
+        _recover_dataforge_layer(dataforge_cache_dir, DATAFORGE_PATCHED_DIR)
     except OSError:
         logger.warning("Could not restore interrupted DataForge cache replacement", exc_info=True)
         return False
 
     stamp = dataforge_cache_dir / ".p4k_mtime"
-    libs_dir = dataforge_cache_dir / "raw" / "libs"
-    if legacy_order and not stamp.exists():
-        try:
-            return dataforge_cache_dir.exists() and dataforge_cache_dir.stat().st_mtime >= p4k_path.stat().st_mtime
-        except Exception:
-            logger.debug("dataforge_cache_is_fresh: legacy mtime check failed", exc_info=True)
-            return False
-    if not stamp.exists() or not libs_dir.exists():
+    pristine_libs = dataforge_cache_dir / DATAFORGE_PRISTINE_DIR / "libs"
+    libs_dir = dataforge_cache_dir / DATAFORGE_PATCHED_DIR / "libs"
+    if not stamp.exists() or not pristine_libs.exists() or not libs_dir.exists():
         return False
     # Verify there is at least one XML file — guards against empty extractions
     if not any(libs_dir.rglob("*.xml")):
         return False
     try:
+        identity = _read_dataforge_identity(dataforge_cache_dir)
+        if identity is None or identity.get("schema_version") != DATAFORGE_CACHE_SCHEMA_VERSION:
+            return False
+        if identity.get("p4k") != _file_identity(p4k_path):
+            return False
+        if unp4k_exe is not None and identity.get("tools", {}).get("unp4k") != _file_identity(Path(unp4k_exe)):
+            return False
+        if unforge_exe is not None and identity.get("tools", {}).get("unforge") != _file_identity(Path(unforge_exe)):
+            return False
+        if patch_root is not None and identity.get("patch_fingerprint") != patch_set_fingerprint(Path(patch_root)):
+            return False
         cached_mtime = float(stamp.read_text().strip())
         return cached_mtime >= p4k_path.stat().st_mtime
     except Exception:

@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from src.utils.resource import _resolve_patches_dir
 from src.utils.settings import AppSettings
 
 logger = logging.getLogger(__name__)
@@ -146,13 +147,36 @@ class StartupFlowManager(QObject):
             # Never extracted — handled later by check_enhancements_freshness,
             # which shows a richer category-selection dialog.
             return
-        if dataforge_cache_is_fresh(p4k_path, forge_dir):
+        if dataforge_cache_is_fresh(
+            p4k_path,
+            forge_dir,
+            AppSettings.get_unp4k_exe_path(),
+            AppSettings.get_unforge_exe_path(),
+        ):
+            if dataforge_cache_is_fresh(
+                p4k_path,
+                forge_dir,
+                AppSettings.get_unp4k_exe_path(),
+                AppSettings.get_unforge_exe_path(),
+                _resolve_patches_dir(),
+            ):
+                return
+            reply = QMessageBox.question(
+                self._parent,
+                "DataForge Patches Updated",
+                "Open Strings' DataForge patches have changed.\n\n"
+                "Rebuild the patched cache and regenerate enhancements now?\n\n"
+                "This uses your local cached DataForge data and does not re-extract Data.p4k.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._worker_coord.start_enhancements_generation()
             return
 
         reply = QMessageBox.question(
             self._parent,
             "DataForge Cache Outdated",
-            "Your DataForge entity cache is older than the current Data.p4k.\n\n"
+            "Your DataForge entity cache or extraction tools have changed.\n\n"
             "Re-extract DataForge and regenerate enhancements now?\n\n"
             "This takes 5–10 minutes and runs in the background — you can keep "
             "editing strings while it works. Skip for now if you'd rather not wait; "
