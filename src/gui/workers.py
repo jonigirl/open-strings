@@ -1,6 +1,8 @@
 """Worker threads and dialog for Open Strings GUI operations."""
 
+import hashlib
 import importlib.util
+import json
 import logging
 import sys
 from pathlib import Path
@@ -14,6 +16,28 @@ from src.utils.resource import _resolve_patches_dir
 from src.utils.settings import AppSettings
 
 logger = logging.getLogger(__name__)
+
+_BASE_INI_GENERATION_MARKER = ".enhancements_base_ini.json"
+
+
+def _base_ini_identity(path: Path) -> dict[str, int | str]:
+    stat = path.stat()
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    return {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns, "sha256": digest}
+
+
+def _base_ini_needs_regeneration(base_ini: Path, cache_dir: Path) -> bool:
+    marker = cache_dir / _BASE_INI_GENERATION_MARKER
+    try:
+        return json.loads(marker.read_text(encoding="utf-8")) != _base_ini_identity(base_ini)
+    except (OSError, json.JSONDecodeError):
+        return True
+
+
+def _record_generated_base_ini(base_ini: Path, cache_dir: Path) -> None:
+    (cache_dir / _BASE_INI_GENERATION_MARKER).write_text(
+        json.dumps(_base_ini_identity(base_ini), sort_keys=True), encoding="utf-8"
+    )
 
 
 class AnimatedProgressDialog(QProgressDialog):
@@ -234,6 +258,7 @@ class EnhancementsGeneratorWorker(QThread):
                 raise FileNotFoundError(f"Enhancements generator script not found: {script_path}")
 
             base_ini = AppSettings.get_cache_dir() / "base.ini"
+            cache_dir = AppSettings.get_cache_dir()
             forge_dir = AppSettings.get_dataforge_cache_dir()
             patch_fingerprint = patch_set_fingerprint(_resolve_patches_dir())
 
@@ -265,14 +290,14 @@ class EnhancementsGeneratorWorker(QThread):
             # set() → nothing changed, skip entirely.
             # {...} → only re-run the categories whose source XMLs changed.
             libs_dir = forge_dir / "raw" / "libs"
-            diff = None if self.force_full or patched_rebuilt else dirty_categories(libs_dir)
+            base_ini_changed = _base_ini_needs_regeneration(base_ini, cache_dir)
+            diff = None if self.force_full or patched_rebuilt or base_ini_changed else dirty_categories(libs_dir)
             # If any enabled enhancement files are missing, force a full
             # regeneration — even if the manifest reports some or all categories
             # as clean.  This handles first-run after a fresh install, and the
             # case where a partial prior run generated only some categories
             # (leaving the others absent).
             if diff is not None:
-                cache_dir = AppSettings.get_cache_dir()
                 missing = [name for name in AppSettings.ENHANCEMENTS_FILES.values() if not (cache_dir / name).exists()]
                 if missing:
                     sample = ", ".join(missing[:3])
@@ -327,6 +352,8 @@ class EnhancementsGeneratorWorker(QThread):
                 progress_callback=_on_progress,
                 patches_dir=_resolve_patches_dir(),
             )
+            if set(self.categories or ()) == AppSettings.get_enabled_enhancement_categories():
+                _record_generated_base_ini(base_ini, cache_dir)
             if (
                 not self.force_full
                 and not patched_rebuilt

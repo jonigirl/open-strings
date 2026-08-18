@@ -127,6 +127,12 @@ class TestDirtyCategories:
         result = dirty_categories(tmp_path)
         assert result is None
 
+    def test_returns_none_when_manifest_is_corrupt(self, tmp_path: Path) -> None:
+        _write_xml(tmp_path / "foundry" / "records" / "entities" / "spaceships" / "ship.xml")
+        (tmp_path / MANIFEST_FILE).write_text("{not valid json", encoding="utf-8")
+
+        assert dirty_categories(tmp_path) is None
+
     def test_returns_empty_set_when_nothing_changed(self, tmp_path: Path) -> None:
         _write_xml(tmp_path / "foundry" / "records" / "entities" / "spaceships" / "ship.xml")
         update_manifest(tmp_path)
@@ -193,6 +199,16 @@ class TestDirtyCategories:
         result = dirty_categories(tmp_path)
         assert result is not None
         assert "ships" in result
+
+    def test_overlapping_weapon_path_marks_all_dependent_categories(self, tmp_path: Path) -> None:
+        weapon = tmp_path / "foundry" / "records" / "entities" / "scitem" / "ships" / "weapons" / "gun.xml"
+        _write_xml(weapon, "<root>v1</root>")
+        update_manifest(tmp_path)
+        weapon.write_text("<root>v2</root>", encoding="utf-8")
+
+        result = dirty_categories(tmp_path)
+
+        assert result == {"components", "ship_weapons", "commodities", "journal"}
 
     def test_returns_empty_set_when_content_unchanged_despite_mtime(self, tmp_path: Path) -> None:
         ship = tmp_path / "foundry" / "records" / "entities" / "spaceships" / "ship.xml"

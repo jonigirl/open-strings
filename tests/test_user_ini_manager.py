@@ -70,13 +70,14 @@ class TestSaveUserIniDict:
         assert deep_path.exists()
 
     def test_write_failure_raises(self, tmp_path, monkeypatch):
-        """IOError during write should propagate out of _write_kv_to_path."""
-        from unittest.mock import patch
-
         path = tmp_path / "user.ini"
-        with patch("builtins.open", side_effect=OSError("disk full")):
-            with pytest.raises(OSError, match="disk full"):
-                save_user_ini_dict({"k": "v"}, path)
+        path.write_text("old=value\n", encoding="utf-8")
+        monkeypatch.setattr("src.utils.file_utils.os.replace", lambda *_: (_ for _ in ()).throw(OSError("disk full")))
+
+        with pytest.raises(OSError, match="disk full"):
+            save_user_ini_dict({"k": "v"}, path)
+
+        assert path.read_text(encoding="utf-8") == "old=value\n"
 
 
 class TestShouldAutosaveUserIni:

@@ -8,6 +8,8 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from src.utils.file_utils import atomic_write_bytes
+
 logger = logging.getLogger(__name__)
 
 # 50 MB cap — INI/XML source files should never be remotely close to this.
@@ -62,8 +64,7 @@ def download_file(url: str, output_path: str | Path) -> Path:
             file_data = b"".join(chunks)
 
         # Write to output
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_bytes(file_data)
+        atomic_write_bytes(output_path, file_data)
 
         logger.info(f"Downloaded to {output_path} ({len(file_data)} bytes)")
         return output_path
@@ -114,8 +115,7 @@ def download_file_if_changed(url: str, output_path: str | Path) -> bool:
                 chunks.append(chunk)
             data = b"".join(chunks)
 
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_bytes(data)
+        atomic_write_bytes(output_path, data)
         logger.info(f"Downloaded updated {output_path.name} ({len(data):,} bytes) from {url}")
         return True
 

@@ -36,12 +36,11 @@ class TestValidateAppliedFile:
         assert "k3" in result
         assert "missing" in result.lower()
 
-    def test_extra_keys_reported(self, tmp_path):
+    def test_extra_keys_are_allowed(self, tmp_path):
         stock = {"k1"}
         written = tmp_path / "written.ini"
         written.write_text("k1=a\nextra_key=x\n", encoding="utf-8")
-        result = validate_applied_file(written, tmp_path, stock_keys=stock)
-        assert "extra_key" in result
+        assert validate_applied_file(written, tmp_path, stock_keys=stock) == ""
 
     def test_no_cache_without_stock_keys_skips(self, tmp_path):
         written = tmp_path / "written.ini"

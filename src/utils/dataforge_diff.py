@@ -23,12 +23,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from src.utils.dataforge_contract import DATAFORGE_CATEGORY_SUBTREES
+from src.utils.file_utils import atomic_write_text
+
+logger = logging.getLogger(__name__)
 
 MANIFEST_FILE = ".diff_manifest.json"
 _HASH_WORKERS = max(8, (os.cpu_count() or 4) * 2)
@@ -138,8 +142,7 @@ def update_manifest(
     """
     cache_dir = Path(cache_dir)
     snapshot = _build_snapshot(cache_dir, progress_callback=progress_callback)
-    with open(_manifest_path(cache_dir), "w", encoding="utf-8") as f:
-        json.dump(snapshot, f, separators=(",", ":"))
+    atomic_write_text(_manifest_path(cache_dir), json.dumps(snapshot, separators=(",", ":")))
 
 
 def dirty_categories(cache_dir: Path) -> set[str] | None:
@@ -157,8 +160,12 @@ def dirty_categories(cache_dir: Path) -> set[str] | None:
     if not manifest_file.exists():
         return None  # first run — regenerate everything
 
-    with open(manifest_file, encoding="utf-8") as f:
-        old: dict[str, dict] = json.load(f)
+    try:
+        with open(manifest_file, encoding="utf-8") as file:
+            old: dict[str, dict] = json.load(file)
+    except (OSError, json.JSONDecodeError):
+        logger.warning("DataForge diff manifest is unreadable; forcing full regeneration", exc_info=True)
+        return None
 
     new = _build_snapshot(cache_dir)
 
@@ -182,6 +189,5 @@ def dirty_categories(cache_dir: Path) -> set[str] | None:
         for category, subtrees in CATEGORY_SUBTREES.items():
             if any(rel_path.startswith(prefix) for prefix in subtrees):
                 dirty.add(category)
-                break
 
     return dirty

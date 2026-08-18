@@ -64,7 +64,7 @@ def validate_applied_file(
         f"missing={len(missing)}, extra={len(extra)}"
     )
 
-    if not missing and not extra:
+    if not missing:
         return ""
 
     lines = []
@@ -75,15 +75,6 @@ def validate_applied_file(
         lines += [f"  {k}" for k in sample]
         if len(missing) > _VALIDATION_SAMPLE_SIZE:
             lines.append(f"  ... and {len(missing) - _VALIDATION_SAMPLE_SIZE} more")
-
-    if extra:
-        if lines:
-            lines.append("")
-        sample = sorted(extra)[:_VALIDATION_SAMPLE_SIZE]
-        lines += [f"{len(extra)} unexpected key(s) in written file (not in base.ini):"]
-        lines += [f"  {k}" for k in sample]
-        if len(extra) > _VALIDATION_SAMPLE_SIZE:
-            lines.append(f"  ... and {len(extra) - _VALIDATION_SAMPLE_SIZE} more")
 
     lines += ["", "The previous file has been restored. Check your source configuration."]
     return "\n".join(lines)

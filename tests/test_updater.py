@@ -84,6 +84,19 @@ def test_download_file_reraises_on_oserror(tmp_path):
             download_file(_URL, tmp_path / "out.ini")
 
 
+def test_download_failure_preserves_existing_file(tmp_path, monkeypatch):
+    data = b"new data"
+    mock_urlopen, _ = _make_urlopen_mock(data)
+    out = tmp_path / "out.ini"
+    out.write_bytes(b"old data")
+    monkeypatch.setattr("src.utils.file_utils.os.replace", lambda *_: (_ for _ in ()).throw(OSError("disk full")))
+
+    with patch("src.utils.updater.urlopen", mock_urlopen), pytest.raises(OSError, match="disk full"):
+        download_file(_URL, out)
+
+    assert out.read_bytes() == b"old data"
+
+
 # ---------------------------------------------------------------------------
 # download_file_if_changed
 # ---------------------------------------------------------------------------

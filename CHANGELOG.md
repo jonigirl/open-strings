@@ -11,11 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A dedicated launcher menu-heading editor with a reset action and an optional
   Open Strings version suffix.
+- DataForge now keeps a protected pristine extraction plus a patched working
+  layer, allowing patch changes to rebuild enhancements without re-extracting
+  `Data.p4k`.
+- DataForge cache health checks verify essential XML before staged cache data
+  becomes live.
 
 ### Fixed
 
 - Component name tags now support new Star Citizen 4.10 class and item-type
   metadata, including a compact fallback for future unrecognised values.
+- Apply validation accepts expected enhancement overlay keys while still
+  rejecting missing stock keys.
+- Overlapping DataForge paths regenerate every dependent enhancement category.
+- Enhancement regeneration now detects changed base localization text.
+- Generated INIs, user overrides, manifests, and downloaded source files use
+  atomic replacement to preserve existing data on write failure.
 
 ## [1.4.2] - 2026-06-22
 

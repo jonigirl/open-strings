@@ -6,9 +6,30 @@ import os
 import shutil
 import stat
 import time
+import uuid
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def atomic_write_bytes(path: Path, data: bytes) -> None:
+    """Replace a file only after its complete replacement is durable in the same directory."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary.open("wb") as file:
+            file.write(data)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
+    """Atomically replace a text file with *text*."""
+    atomic_write_bytes(path, text.encode(encoding))
 
 
 def robust_rmtree(path: Path, attempts: int = 6) -> None:

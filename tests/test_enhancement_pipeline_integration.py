@@ -30,8 +30,8 @@ def minimal_base_ini(tmp_path):
     return ini_file
 
 
-def test_pipeline_integration_minimal(minimal_base_ini, minimal_forge_fixture, tmp_path):
-    """Integration test: pipeline runs end-to-end with minimal data."""
+def test_pipeline_rejects_incomplete_facade(minimal_base_ini, minimal_forge_fixture, tmp_path):
+    """The incomplete facade must fail rather than silently generate no output."""
     # Defer import so the script module loads properly
     sys.path.insert(0, str(Path(__file__).parent.parent))
     from src.utils.enhancement_pipeline import EnhancementPipeline
@@ -45,15 +45,12 @@ def test_pipeline_integration_minimal(minimal_base_ini, minimal_forge_fixture, t
         output_dir=output_dir,
     )
 
-    # Should run without errors
-    pipeline.run()
-
-    # Output directory should be created
-    assert output_dir.exists()
+    with pytest.raises(RuntimeError, match="not implemented"):
+        pipeline.run()
 
 
-def test_pipeline_respects_categories(minimal_base_ini, minimal_forge_fixture, tmp_path):
-    """Pipeline respects category filtering."""
+def test_pipeline_rejects_categories_without_generation(minimal_base_ini, minimal_forge_fixture, tmp_path):
+    """Category selection cannot make the incomplete facade appear functional."""
     sys.path.insert(0, str(Path(__file__).parent.parent))
     from src.utils.enhancement_pipeline import EnhancementPipeline
 
@@ -67,7 +64,5 @@ def test_pipeline_respects_categories(minimal_base_ini, minimal_forge_fixture, t
         categories={"ship_descs"},
     )
 
-    pipeline.run()
-
-    # Should complete without error
-    assert output_dir.exists()
+    with pytest.raises(RuntimeError, match="not implemented"):
+        pipeline.run()

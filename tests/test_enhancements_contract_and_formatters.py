@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -34,6 +35,27 @@ def test_enhancement_output_map_matches_app_constants(gen_module):
 def test_enhancement_output_files_have_expected_suffix(gen_module):
     for file_name in gen_module.ENHANCEMENT_OUTPUT_FILES.values():
         assert file_name.endswith("_enhancements.ini")
+
+
+def test_output_batch_restores_prior_files_when_publish_fails(gen_module, tmp_path, monkeypatch):
+    first = tmp_path / "first.ini"
+    second = tmp_path / "second.ini"
+    first.write_text("old-first", encoding="utf-8")
+    second.write_text("old-second", encoding="utf-8")
+    original_replace = os.replace
+
+    def fail_second_staged_publish(source, target):
+        if Path(source).name == "second.ini" and Path(source).parent.name.startswith(".enhancements-"):
+            raise OSError("publish failed")
+        return original_replace(source, target)
+
+    monkeypatch.setattr(gen_module.os, "replace", fail_second_staged_publish)
+
+    with pytest.raises(OSError, match="publish failed"):
+        gen_module.write_output_batch(tmp_path, {"first.ini": "new-first", "second.ini": "new-second"})
+
+    assert first.read_text(encoding="utf-8") == "old-first"
+    assert second.read_text(encoding="utf-8") == "old-second"
 
 
 @pytest.mark.parametrize(

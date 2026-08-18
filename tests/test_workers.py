@@ -62,6 +62,50 @@ class TestResolvePatchesDir:
 
 
 @pytest.mark.unit
+class TestBaseIniGenerationMarker:
+    def test_missing_marker_requires_regeneration(self, tmp_path):
+        from src.gui.workers import _base_ini_needs_regeneration
+
+        base_ini = tmp_path / "base.ini"
+        base_ini.write_text("key=value\n", encoding="utf-8")
+
+        assert _base_ini_needs_regeneration(base_ini, tmp_path) is True
+
+    def test_marker_matches_current_base_ini(self, tmp_path):
+        from src.gui.workers import _base_ini_needs_regeneration, _record_generated_base_ini
+
+        base_ini = tmp_path / "base.ini"
+        base_ini.write_text("key=value\n", encoding="utf-8")
+        _record_generated_base_ini(base_ini, tmp_path)
+
+        assert _base_ini_needs_regeneration(base_ini, tmp_path) is False
+
+    def test_base_ini_change_requires_regeneration(self, tmp_path):
+        from src.gui.workers import _base_ini_needs_regeneration, _record_generated_base_ini
+
+        base_ini = tmp_path / "base.ini"
+        base_ini.write_text("key=old\n", encoding="utf-8")
+        _record_generated_base_ini(base_ini, tmp_path)
+        base_ini.write_text("key=new value\n", encoding="utf-8")
+
+        assert _base_ini_needs_regeneration(base_ini, tmp_path) is True
+
+    def test_same_size_timestamp_preserved_base_ini_change_requires_regeneration(self, tmp_path):
+        import os
+
+        from src.gui.workers import _base_ini_needs_regeneration, _record_generated_base_ini
+
+        base_ini = tmp_path / "base.ini"
+        base_ini.write_text("key=A\n", encoding="utf-8")
+        _record_generated_base_ini(base_ini, tmp_path)
+        before = base_ini.stat()
+        base_ini.write_text("key=B\n", encoding="utf-8")
+        os.utime(base_ini, ns=(before.st_atime_ns, before.st_mtime_ns))
+
+        assert _base_ini_needs_regeneration(base_ini, tmp_path) is True
+
+
+@pytest.mark.unit
 class TestDiffCategoryTranslation:
     """DIFF_CATEGORY_TO_GENERATOR_KEYS must translate dirty_categories() output
     into the vocabulary that generate_enhancements_ini._want() expects."""

@@ -2,7 +2,7 @@
 
 ## First Time Setup
 
-On launch, Open Strings reloads any customizations from your previous session and checks for your Star Citizen installation — the installer pre-fills this path, but you can change it in the **Config** tab. All stock localization and DataForge data is sourced **directly from your installed `Data.p4k`** (no downloads, no community mirrors), so extracting once is a required first step after install or after any game patch.
+On launch, Open Strings reloads any customizations from your previous session and checks for your Star Citizen installation — the installer pre-fills this path, but you can change it in the **Config** tab. All stock localization and DataForge data is sourced **directly from your installed `Data.p4k`**; no game data is downloaded from community mirrors. Extract once after install and after each game patch.
 
 ## 1. Extract Base Localization from Data.p4k
 
@@ -95,7 +95,7 @@ When Star Citizen updates, your edits are preserved in `<data folder>\<channel>\
 
 - **Appearance** — pick the app theme (see below).
 - **Star Citizen Installation** — path to your LIVE directory; auto-detected at install time, editable here.
-- **Open Strings Data** — folder for `user.ini`, caches, DataForge extraction, enhancement INIs, and backups. Defaults to `Documents\Open Strings`; move it off OneDrive-synced Documents if extraction or cache cleanup is slow.
+- **Open Strings Data** — folder for `user.ini`, base localization, enhancement INIs, and backups. Defaults to `Documents\Open Strings`. The larger DataForge cache is kept separately under `%LOCALAPPDATA%\Open Strings\<channel>\cache\dataforge`.
 - **Base Localization (P4K Extraction)** — click **Extract from Data.p4k** to unpack stock localization plus DataForge entity data directly from your installed game. This is the sole source for base strings and enhancement data.
 - **Import INI** — fold an existing INI file into your overrides via the conflict-resolution dialog.
 

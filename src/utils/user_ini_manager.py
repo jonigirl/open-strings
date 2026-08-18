@@ -5,6 +5,7 @@ from pathlib import Path
 
 from src.models.string_model import StringEntry
 from src.parser.ini_parser import parse_ini_file
+from src.utils.file_utils import atomic_write_text
 from src.utils.perf import timed
 
 logger = logging.getLogger(__name__)
@@ -12,11 +13,8 @@ logger = logging.getLogger(__name__)
 
 def _write_kv_to_path(data: dict[str, str], path: Path) -> int:
     """Write key=value pairs to *path*. Returns the number of entries written."""
-    path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with open(path, "w", encoding="utf-8") as f:
-            for key, value in data.items():
-                f.write(f"{key}={value}\n")
+        atomic_write_text(path, "".join(f"{key}={value}\n" for key, value in data.items()))
         return len(data)
     except Exception as e:
         logger.error(f"Failed to save {path}: {e}")

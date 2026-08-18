@@ -165,20 +165,18 @@ uv run python src/main.py
 
 ## Test Coverage
 
-Coverage is measured automatically on every test run. GUI files (`main_window.py`, `config_tab.py`, etc.) are excluded — they are covered by the manual test plan in `TESTPLAN.md`.
+Coverage is measured automatically on every test run. GUI modules have Qt-based regression tests where practical and are supplemented by the manual workflows in `TESTPLAN.md`.
 
-### Current coverage (as of v1.3.0)
+### Current Coverage
 
-| Component               | Coverage | Notes                                                         |
-| ----------------------- | -------- | ------------------------------------------------------------- |
-| `ini_parser.py`         | 93%      | Lines 127–134 are dead code (category filter never triggered) |
-| `ini_merger.py`         | 97%      |                                                               |
-| `string_model.py`       | 75%      |                                                               |
-| `string_table_model.py` | 99%      |                                                               |
-| `overrides_manager.py`  | 100%     |                                                               |
-| `pak_extractor.py`      | 55%      | GUI-driven extraction paths not reachable without a real P4K  |
-| `updater.py`            | 97%      |                                                               |
-| **Overall (non-GUI)**   | **84%**  | Floor enforced at 80% via `--cov-fail-under`; 538 tests       |
+| Area                       | Current expectation         |
+| -------------------------- | --------------------------- |
+| Full suite                 | `uv run pytest` passes      |
+| Coverage floor             | 83% (`--cov-fail-under=83`) |
+| Current development result | 1,000+ tests, 85% coverage  |
+
+The exact percentage naturally changes as code and tests evolve; rely on the full
+suite result rather than treating the development snapshot as a release requirement.
 
 Coverage is uploaded as a `coverage.xml` artifact on every CI run (30-day retention).
 
@@ -216,11 +214,8 @@ Coverage is uploaded as a `coverage.xml` artifact on every CI run (30-day retent
 
 1. **Note exact reproduction steps**
    - Check Log Tab for error messages or exceptions
-2. **Check Windows Registry** for corrupted settings:
-   ```
-   regedit → HKEY_CURRENT_USER\Software\Joni Hayes\Open Strings
-   ```
-3. **Check user data** in `Documents\Open Strings\<channel>\`
+2. **Check settings** in `%APPDATA%\Joni Hayes\Open Strings\settings.json`
+3. **Check user data** in `Documents\Open Strings\<channel>\` and the DataForge cache in `%LOCALAPPDATA%\Open Strings\<channel>\cache\dataforge`
 4. **Check backup files** to see what was written to game
 
 ---

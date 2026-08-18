@@ -33,13 +33,12 @@ def test_missing_keys_reported(tmp_path):
     assert "restored" in result.lower()
 
 
-def test_extra_keys_reported(tmp_path):
+def test_extra_overlay_keys_are_allowed(tmp_path):
     (tmp_path / "base.ini").write_text("key1=a\n", encoding="utf-8")
     written = tmp_path / "written.ini"
-    written.write_text("key1=a\nextra=b\n", encoding="utf-8")
+    written.write_text("key1=a\nitem_DescSHLD_Overlay=b\n", encoding="utf-8")
     result = validate_applied_file(written, tmp_path)
-    assert "1 unexpected key(s)" in result
-    assert "extra" in result
+    assert result == ""
 
 
 def test_precomputed_stock_keys_skips_cache_dir(tmp_path):

@@ -81,14 +81,8 @@ class EnhancementPipeline:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def run(self) -> None:
-        """Run full pipeline: load → build → generate → write.
-
-        Note: This is a structural refactor demonstrating the pattern.
-        Full extraction of main()'s 970 lines is deferred to minimize risk.
-        """
-        # Ensure output directory exists
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-
-        lookups = self.build_lookups()
-        enhancements = self.generate_enhancements(lookups)
-        self.write_outputs(enhancements)
+        """Reject use until this facade has a complete generator implementation."""
+        raise RuntimeError(
+            "EnhancementPipeline is not implemented; use EnhancementsGeneratorWorker or "
+            "scripts/generate_enhancements_ini.py instead."
+        )

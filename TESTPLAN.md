@@ -1,8 +1,8 @@
-# Open Strings 1.1.x Pre-Release Test Plan
+# Open Strings Pre-Release Test Plan
 
 Focused on the UX and integration paths `pytest` can't reach. Automated coverage already exists for parsing/merging/missions/patcher/pak-filtering/channel layout/progress/StringTableModel — don't duplicate.
 
-**Before starting:** `uv run pytest tests/` must pass green (516+ tests, 65%+ coverage). Build a fresh installer and drive the tests below against that installer (not the dev checkout).
+**Before starting:** `uv run pytest` must pass green and meet the configured 83% coverage floor. Build a fresh installer and drive the tests below against that installer (not the dev checkout).
 
 ---
 
@@ -10,12 +10,12 @@ Focused on the UX and integration paths `pytest` can't reach. Automated coverage
 
 Run against the built `dist/OpenStrings-1.0.0-Setup.exe`.
 
-- [ ] **Fresh install** — app launches, tutorial fires on first show, no legacy registry nodes present
+- [ ] **Fresh install** — app launches, tutorial fires on first show, settings JSON is created under `%APPDATA%`
 - [ ] **Reinstall over existing** — no duplicate migrations, no data loss, no zombie uninstall entry
 - [ ] **OneDrive-redirected Documents** — installer's `IsDocsOnOneDrive` page fires; user redirects to local path; `USER_DATA_DIR` override written; app respects it
 - [ ] **OneDrive + override already set** — installer skips the redirect page (`HasDataDirOverride`)
 - [ ] **Config tab data folder override** — change Open Strings Data to a custom local path; app reloads, `user.ini`/cache/backups resolve under `<custom>\<channel>\`, and Reset returns to `Documents\Open Strings`
-- [ ] **Uninstall → reinstall** — preserves `backups/`, registry settings, and `user.ini` across the cycle
+- [ ] **Uninstall → reinstall** — preserves `backups/`, settings JSON, and `user.ini` across the cycle
 - [ ] **Uninstall** does NOT delete `Documents\Open Strings\backups\`
 
 ## 2. Per-channel end-to-end
@@ -36,7 +36,7 @@ For **each channel you have installed** (minimum: LIVE; ideally also PTU):
 Per active channel:
 
 - [ ] **Extract from Data.p4k** — determinate progress bar, shows unp4k → unforge → cache filter phases, completes without Log tab errors
-- [ ] Cache size sanity: `cache\dataforge\` ≈ 1.3 GB / ≈ 28k files (not the old 2.4 GB / 58k). Larger = `_copy_filtered_records` regressed
+- [ ] Cache size sanity: `%LOCALAPPDATA%\Open Strings\<channel>\cache\dataforge\` contains both `pristine\` and `raw\` layers. A patch-only refresh rebuilds `raw\` without re-extracting `Data.p4k`.
 - [ ] **Generate Enhancements** — determinate progress, no "Ready" mid-run, all 7 output INIs produced
 - [ ] **Post-extract auto-reload** — strings load into the table automatically when Extract finishes; table populates instantly, no freeze on 87k+ rows
 - [ ] **Edit a string** — autosaves to `user.ini`, Modified status appears, survives app restart
@@ -90,7 +90,7 @@ Boot SC (LIVE) after an Apply. Spot-check each category:
 - [ ] Missing `Data.p4k` → clean error, no crash
 - [ ] Point SC install at an invalid path → Config validation hint; Apply fails gracefully
 - [ ] Delete `user.ini` → regenerates on next edit; legacy `overrides.ini` auto-renames on first read
-- [ ] Corrupt `ACTIVE_CHANNEL` registry value → falls back cleanly
+- [ ] Corrupt `active_channel` in settings JSON → falls back cleanly
 - [ ] Hold a file open in `cache\dataforge\` during Clear Cache → `_robust_rmtree` retries and succeeds, or surfaces a clear error
 
 ## 9. Documentation read-through (explicit 1.0 ROADMAP item)

@@ -33,19 +33,11 @@ For creating the installer, download from: https://jrsoftware.org/isdl.php
 
 ---
 
-## Step 0 (Optional): Clean Cache for Distribution
+## Step 0 (Optional): Exclude User Data
 
-If distributing to users, optionally clean the DataForge cache to reduce user data size:
-
-```bash
-uv run python scripts/build/clean_cache_for_distribution.py
-```
-
-This removes the `raw/` DataForge extraction (keeping the filtered `libs/` which has all necessary stats data).
-Users can regenerate raw/ if needed by re-extracting their P4K.
-
-**Note:** The executable doesn't bundle user cache data - it's created at runtime. This script is only
-useful if you've manually included cache in any distribution package.
+The executable does not bundle user cache data. Do not include the DataForge cache in a
+distribution: its protected `pristine/` and `raw/` layers are created at runtime from the
+user's installed `Data.p4k`.
 
 ---
 

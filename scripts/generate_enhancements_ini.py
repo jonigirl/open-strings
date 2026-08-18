@@ -19,9 +19,12 @@ Usage:
 
 import json
 import logging
+import os
 import pickle
 import re
+import shutil
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -31,6 +34,7 @@ from src.utils import enhancement_formatters as _enh_formatters
 from src.utils.dataforge_xml import attr as _attr
 from src.utils.dataforge_xml import find as _find
 from src.utils.dataforge_xml import poly_type as _poly_type
+from src.utils.file_utils import atomic_write_text
 from src.utils.formatting import NULL_UUID
 from src.utils.formatting import fmt as _fmt
 
@@ -120,10 +124,42 @@ def parse_ini(path: Path) -> dict[str, str]:
 
 
 def write_ini(path: Path, entries: dict[str, str]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     lines = [f"{k}={v}" for k, v in sorted(entries.items())]
-    path.write_text("\n".join(lines), encoding="utf-8")
+    atomic_write_text(path, "\n".join(lines))
     logger.info(f"Written {len(entries):,} entries -> {path}")
+
+
+def write_output_batch(output_dir: Path, files: dict[str, str]) -> None:
+    """Publish a set of generated files together, restoring prior files on replacement failure."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    staging_dir = Path(tempfile.mkdtemp(prefix=".enhancements-", dir=output_dir))
+    backup_dir = staging_dir / "backup"
+    committed: list[Path] = []
+    try:
+        for file_name, content in files.items():
+            atomic_write_text(staging_dir / file_name, content)
+
+        backup_dir.mkdir()
+        for file_name in files:
+            target = output_dir / file_name
+            if target.exists():
+                shutil.copy2(target, backup_dir / file_name)
+
+        try:
+            for file_name in files:
+                target = output_dir / file_name
+                os.replace(staging_dir / file_name, target)
+                committed.append(target)
+        except OSError:
+            for target in reversed(committed):
+                backup = backup_dir / target.name
+                if backup.exists():
+                    os.replace(backup, target)
+                else:
+                    target.unlink(missing_ok=True)
+            raise
+    finally:
+        shutil.rmtree(staging_dir, ignore_errors=True)
 
 
 # ── Derived-lookup disk cache ─────────────────────────────────────────────────
@@ -3321,12 +3357,18 @@ def main(
     # ── Write output ──────────────────────────────────────────────────────────
     logger.info("Writing output files…")
     _flush()
+    report_path = output_dir / "dataforge_compatibility_report.json"
+    output_files = {
+        file_name: "\n".join(f"{key}={value}" for key, value in sorted(outputs_by_key[enhancement_key].items()))
+        for enhancement_key, file_name in ENHANCEMENT_OUTPUT_FILES.items()
+        if _want(enhancement_key)
+    }
+    output_files[report_path.name] = json.dumps({"tag_fallbacks": tag_fallbacks}, indent=2)
+    write_output_batch(output_dir, output_files)
     for enhancement_key, file_name in ENHANCEMENT_OUTPUT_FILES.items():
         if _want(enhancement_key):
-            write_ini(output_dir / file_name, outputs_by_key[enhancement_key])
+            logger.info(f"Written {len(outputs_by_key[enhancement_key]):,} entries -> {output_dir / file_name}")
 
-    report_path = output_dir / "dataforge_compatibility_report.json"
-    report_path.write_text(json.dumps({"tag_fallbacks": tag_fallbacks}, indent=2), encoding="utf-8")
     fallback_count = sum(len(values) for values in tag_fallbacks.values())
     logger.info(f"Compatibility report: {fallback_count} unknown tag value(s) → {report_path}")
 
