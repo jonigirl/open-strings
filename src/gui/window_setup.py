@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QPushButton,
     QTableView,
     QTextBrowser,
@@ -37,6 +38,7 @@ from src.gui.theme import (
 )
 from src.gui.workers import SelectAllDelegate
 from src.utils.resource import get_resource_path
+from src.utils.settings import AppSettings
 from src.utils.version import get_version
 
 if TYPE_CHECKING:
@@ -223,6 +225,35 @@ def create_strings_tab(parent: MainWindow) -> QWidget:
     layout = QVBoxLayout(widget)
 
     parent._model = StringTableModel(parent)
+
+    menu_heading_layout = QHBoxLayout()
+    menu_heading_layout.addWidget(QLabel("Menu Heading:"))
+
+    parent.menu_heading_input = QLineEdit()
+    parent.menu_heading_input.setMinimumWidth(320)
+    parent.menu_heading_input.setEnabled(False)
+    parent.menu_heading_input.setPlaceholderText("Load localization strings to edit the launcher heading")
+    parent.menu_heading_input.setToolTip(
+        "Text shown at the top of the Star Citizen launcher menu. Changes are saved with your other localization edits."
+    )
+    parent.menu_heading_input.editingFinished.connect(parent._save_menu_heading)
+    menu_heading_layout.addWidget(parent.menu_heading_input, stretch=1)
+
+    parent.reset_menu_heading_btn = QPushButton("Reset")
+    parent.reset_menu_heading_btn.setEnabled(False)
+    parent.reset_menu_heading_btn.setToolTip("Restore the stock launcher menu heading")
+    parent.reset_menu_heading_btn.clicked.connect(parent._reset_menu_heading)
+    menu_heading_layout.addWidget(parent.reset_menu_heading_btn)
+
+    parent.show_frontend_stamp_check = QCheckBox("Show Open Strings version")
+    parent.show_frontend_stamp_check.setChecked(AppSettings.get_show_frontend_version_stamp())
+    parent.show_frontend_stamp_check.setToolTip(
+        "Append the Open Strings version to the launcher menu heading when applying changes."
+    )
+    parent.show_frontend_stamp_check.toggled.connect(AppSettings.set_show_frontend_version_stamp)
+    menu_heading_layout.addWidget(parent.show_frontend_stamp_check)
+
+    layout.addLayout(menu_heading_layout)
 
     parent.table = QTableView()
     parent.table.setModel(parent._model)

@@ -348,7 +348,10 @@ class MainWindow(QMainWindow):
             # Stamp the main-menu version chip so the game shows that
             # Open Strings is active. Idempotent across re-applies and
             # version bumps; skipped if stock doesn't ship the key.
-            merged_dict = _stamp_frontend_version(merged_dict)
+            merged_dict = _stamp_frontend_version(
+                merged_dict,
+                enabled=AppSettings.get_show_frontend_version_stamp(),
+            )
 
             source_paths = {name: AppSettings.get_source_path(name) for name in hierarchy}
             base_file = find_apply_base_file(hierarchy, source_paths, AppSettings.get_cache_dir())
@@ -1253,6 +1256,7 @@ class MainWindow(QMainWindow):
         self.default_values = default_values
         self.entries = entries
         self.update_category_combo()
+        self._sync_menu_heading_editor()
 
         # Push data into the model — the view renders only visible rows, so this is instant
         self._model.set_data_source(
@@ -1271,6 +1275,41 @@ class MainWindow(QMainWindow):
         if self.startup_flow_mgr.check_enhancements_after_loading:
             self.startup_flow_mgr.check_enhancements_after_loading = False
             self.startup_flow_mgr.check_enhancements_freshness()
+
+    def _menu_heading_entry(self):
+        """Return the launcher heading entry when present in the loaded localization data."""
+        return next((entry for entry in self.entries if entry.key == "Frontend_PU_Version"), None)
+
+    def _sync_menu_heading_editor(self) -> None:
+        entry = self._menu_heading_entry()
+        has_entry = entry is not None
+        self.menu_heading_input.setEnabled(has_entry)
+        self.reset_menu_heading_btn.setEnabled(has_entry)
+        if has_entry:
+            self.menu_heading_input.setText(entry.custom_value or entry.original_value)
+        else:
+            self.menu_heading_input.clear()
+            self.menu_heading_input.setPlaceholderText("This game version has no launcher menu heading")
+
+    def _save_menu_heading(self) -> None:
+        entry = self._menu_heading_entry()
+        if entry is None:
+            return
+        value = self.menu_heading_input.text()
+        entry.custom_value = value if value != entry.original_value else ""
+        entry.status = "Modified" if entry.custom_value else "Unmodified"
+        self.apply_filters()
+        self._update_status_bar()
+
+    def _reset_menu_heading(self) -> None:
+        entry = self._menu_heading_entry()
+        if entry is None:
+            return
+        entry.custom_value = ""
+        entry.status = "Unmodified"
+        self.menu_heading_input.setText(entry.original_value)
+        self.apply_filters()
+        self._update_status_bar()
 
     @pyqtSlot(str)
     def _on_loading_error(self, error_msg: str):

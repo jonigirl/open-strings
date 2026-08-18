@@ -243,6 +243,14 @@ class TestBlueprintNameTags:
         tag = gen_module._component_name_tag(desc)
         assert tag == "[MIN-S0-B]"
 
+    def test_tagger_handles_new_class_and_item_type_fallbacks(self, gen_module):
+        """New 4.10 component metadata should still produce a compact tag."""
+        class_desc = "Size: 2\nGrade: B\nClass: Exploration"
+        assert gen_module._component_name_tag(class_desc) == "[EXP-S2-B]"
+
+        type_desc = "Size: S0\nItem Type: Survey Scanner\nGrade: B"
+        assert gen_module._component_name_tag(type_desc) == "[SUR-S0-B]"
+
     def test_tagger_fallback_mining_laser_size_only(self, gen_module):
         """Mining head with S-prefix size + Item Type but no Grade → [TYPE-Sx]."""
         desc = "Size: S0\nItem Type: Mining Laser"

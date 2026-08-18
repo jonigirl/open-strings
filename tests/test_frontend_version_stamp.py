@@ -29,6 +29,11 @@ class TestFrontendVersionStamp:
         _stamp_frontend_version(merged)
         assert _FRONTEND_VERSION_KEY not in merged
 
+    def test_skips_when_disabled(self, mock_version):
+        merged = {_FRONTEND_VERSION_KEY: "My Custom Build"}
+        _stamp_frontend_version(merged, enabled=False)
+        assert merged[_FRONTEND_VERSION_KEY] == "My Custom Build"
+
     def test_idempotent_same_version(self, mock_version):
         merged = {_FRONTEND_VERSION_KEY: "Star Citizen Alpha 4.8.0 PTU"}
         _stamp_frontend_version(merged)

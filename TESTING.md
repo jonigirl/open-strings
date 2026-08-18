@@ -329,6 +329,9 @@ For any component category that had changes:
 1. Search for a known item (e.g., `item_DescQDRV_ARCC_S03_Echo`) in the table
 2. Verify the stats block is present and the numbers look plausible
 3. Check the log tab for any `sync_key_variants: conflict` warnings on enhancement keys — these indicate a new `_SCItem` variant pattern that may need investigation
+4. Verify that components with new `Class:` or `Item Type:` metadata have a compact
+   bracket name tag; unfamiliar values should use the generator's fallback token
+   instead of silently losing their tag.
 
 ### 4. Run the automated suite
 
@@ -336,7 +339,8 @@ For any component category that had changes:
 uv run pytest tests/ --tb=short
 ```
 
-All 446 tests must pass before considering the patch verified.
+The full suite must pass and meet the configured coverage threshold before
+considering the patch verified.
 
 ---
 

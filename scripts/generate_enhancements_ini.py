@@ -402,6 +402,7 @@ _CLASS_ABBREV = {
     "Civilian": "CIV",
     "Industrial": "IND",
     "Stealth": "STH",
+    "Exploration": "EXP",
 }
 
 # Abbreviations for the "Item Type:" field found in mining-head and related
@@ -409,7 +410,23 @@ _CLASS_ABBREV = {
 # as new gear categories surface that need similar handling.
 _ITEM_TYPE_ABBREV: dict[str, str] = {
     "Mining Laser": "MIN",
+    "Survey Scanner": "SUR",
 }
+
+
+def _derive_tag_token(raw: str) -> str:
+    """Create a compact 3-letter token for new component classes/types."""
+    cleaned = re.sub(r"[^A-Za-z]+", " ", raw).strip()
+    if not cleaned:
+        return "UNK"
+
+    letters: list[str] = []
+    for part in cleaned.split():
+        letters.extend(ch for ch in part if ch.isalpha())
+        if len("".join(letters)) >= 3:
+            break
+    token = "".join(letters)[:3].upper()
+    return token if token else "UNK"
 
 
 def _component_name_tag(desc_value: str, root: ET.Element | None = None) -> str | None:
@@ -439,9 +456,9 @@ def _component_name_tag(desc_value: str, root: ET.Element | None = None) -> str 
     grade_m = re.search(r"Grade:\s*([A-D])", desc_value)
     class_m = re.search(r"Class:\s*(\w+)", desc_value)
     if size_m and grade_m and class_m:
-        abbrev = _CLASS_ABBREV.get(class_m.group(1))
-        if abbrev:
-            return f"[{abbrev}-S{size_m.group(1)}-{grade_m.group(1)}]"
+        class_name = class_m.group(1).strip()
+        abbrev = _CLASS_ABBREV.get(class_name) or _derive_tag_token(class_name)
+        return f"[{abbrev}-S{size_m.group(1)}-{grade_m.group(1)}]"
 
     # Fallback path — mining heads / lasers write "Size: S0" / "Size: S00";
     # accept an optional leading 'S' on the digit.
@@ -450,7 +467,8 @@ def _component_name_tag(desc_value: str, root: ET.Element | None = None) -> str 
         return None
     size_str = size_fb.group(1)
     type_m = re.search(r"Item Type:\s*([^\\\n]+)", desc_value)
-    type_abbrev = _ITEM_TYPE_ABBREV.get(type_m.group(1).strip()) if type_m else None
+    type_name = type_m.group(1).strip() if type_m else ""
+    type_abbrev = _ITEM_TYPE_ABBREV.get(type_name) or (_derive_tag_token(type_name) if type_name else None)
     # Re-use grade_m from the strict path (pattern unchanged).
     if type_abbrev and grade_m:
         return f"[{type_abbrev}-S{size_str}-{grade_m.group(1)}]"

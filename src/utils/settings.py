@@ -258,6 +258,9 @@ class AppSettings:
     FONT_OPENDYSLEXIC = "opendyslexic"
     DEFAULT_FONT = FONT_SEGOE
 
+    # Settings keys - Launcher menu heading
+    SHOW_FRONTEND_VERSION_STAMP = "show_frontend_version_stamp"
+
     # Settings keys - Enhancements
     ENHANCEMENTS_ENABLED = "enhancements_enabled"
 
@@ -350,6 +353,18 @@ class AppSettings:
     def set_enhancements_enabled(enabled: bool) -> None:
         """Enable or disable enhancements."""
         AppSettings.settings().setValue(AppSettings.ENHANCEMENTS_ENABLED, enabled)
+
+    @staticmethod
+    def get_show_frontend_version_stamp() -> bool:
+        """Return whether the launcher menu heading includes the app version suffix."""
+        return AppSettings.settings().value(AppSettings.SHOW_FRONTEND_VERSION_STAMP, True, type=bool)
+
+    @staticmethod
+    def set_show_frontend_version_stamp(enabled: bool) -> None:
+        """Persist the launcher menu heading version suffix preference."""
+        settings = AppSettings.settings()
+        settings.setValue(AppSettings.SHOW_FRONTEND_VERSION_STAMP, enabled)
+        settings.sync()
 
     @staticmethod
     def get_enhancement_category_enabled(key: str) -> bool:

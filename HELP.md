@@ -20,6 +20,13 @@ When extraction finishes, the extracted `base.ini` is loaded into the table auto
 - **Custom Value** — your personal edit. Saved automatically on every change and persisted to `<data folder>\<channel>\user.ini` (the data folder defaults to `Documents\Open Strings`; each Star Citizen channel — LIVE, PTU, EPTU, HOTFIX, TECH-PREVIEW — has its own isolated overrides).
 - Edits are highlighted with a **Modified** status (green).
 
+### Launcher Menu Heading
+
+The **Menu Heading** field above the table changes the heading shown at the top of
+the Star Citizen launcher menu. Click **Reset** to restore the stock heading. By
+default, Open Strings appends its version when you apply changes; clear **Show Open
+Strings version** to keep the heading exactly as you entered it.
+
 ## 3. Preview Pane
 
 The **preview pane** in the top-right shows the rendered text of whatever row is currently selected. The game's loc-string tokens are translated into styled HTML so you see roughly how your string will read in-game:

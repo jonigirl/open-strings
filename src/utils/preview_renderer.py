@@ -37,14 +37,14 @@ _FRONTEND_VERSION_STAMP_RE = _re_mod.compile(
 )
 
 
-def _stamp_frontend_version(merged: dict) -> dict:
+def _stamp_frontend_version(merged: dict, *, enabled: bool = True) -> dict:
     """Append the Open Strings watermark to Frontend_PU_Version in place.
 
     Skips entirely if the key is not present in *merged* — we don't
     fabricate the key when stock doesn't have it. Mutates and returns
     *merged*.
     """
-    if _FRONTEND_VERSION_KEY not in merged:
+    if not enabled or _FRONTEND_VERSION_KEY not in merged:
         return merged
     base = _FRONTEND_VERSION_STAMP_RE.sub("", merged[_FRONTEND_VERSION_KEY]).rstrip()
     merged[_FRONTEND_VERSION_KEY] = f"{base} | Localizations Enhanced with Open Strings v{get_version()}"

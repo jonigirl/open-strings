@@ -63,6 +63,11 @@ class TestEnhancementSettings:
         AppSettings.set_enhancements_enabled(True)
         assert AppSettings.get_enhancements_enabled() is True
 
+    def test_frontend_version_stamp_roundtrip(self, isolated_qsettings):
+        assert AppSettings.get_show_frontend_version_stamp() is True
+        AppSettings.set_show_frontend_version_stamp(False)
+        assert AppSettings.get_show_frontend_version_stamp() is False
+
     def test_enhancement_category_enabled_roundtrip(self, isolated_qsettings):
         assert AppSettings.get_enhancement_category_enabled("ships") is True
         AppSettings.set_enhancement_category_enabled("ships", False)
