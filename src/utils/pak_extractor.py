@@ -61,6 +61,18 @@ DATAFORGE_PRISTINE_DIR = "pristine"
 DATAFORGE_PATCHED_DIR = "raw"
 DATAFORGE_REQUIRED_HEALTH_SUBPATHS = ("entities/scitem", "entities/spaceships")
 
+# Staging/backup directory suffixes only need to be unique for the lifetime
+# of a single extraction on one machine, not globally unique. A short suffix
+# keeps these transient sibling directories from pushing deeply nested
+# DataForge XML paths past Windows' 260-char MAX_PATH — a full 32-hex-char
+# uuid4().hex added ~34 characters versus this 8-char suffix.
+_TRANSIENT_SUFFIX_LEN = 8
+
+
+def _transient_suffix() -> str:
+    """Return a short, locally-unique suffix for staging/backup directory names."""
+    return uuid.uuid4().hex[:_TRANSIENT_SUFFIX_LEN]
+
 
 @dataclass(frozen=True)
 class DataForgeHealthReport:
@@ -141,7 +153,7 @@ def _has_required_dataforge_xml(cache_dir: Path) -> bool:
 
 def _replace_dataforge_cache(staging_dir: Path, cache_dir: Path) -> None:
     """Replace *cache_dir* with a complete staged cache, restoring it on swap failure."""
-    backup_dir = cache_dir.with_name(f".{cache_dir.name}.backup-{uuid.uuid4().hex}")
+    backup_dir = cache_dir.with_name(f".{cache_dir.name}.backup-{_transient_suffix()}")
     had_cache = cache_dir.exists()
     try:
         if had_cache:
@@ -261,7 +273,7 @@ def rebuild_patched_dataforge_cache(
     if not pristine_libs.exists():
         raise FileNotFoundError(f"Pristine DataForge cache missing at {pristine_libs}")
 
-    staging_root = cache_dir / f".{DATAFORGE_PATCHED_DIR}.staging-{uuid.uuid4().hex}"
+    staging_root = cache_dir / f".{DATAFORGE_PATCHED_DIR}.staging-{_transient_suffix()}"
     try:
         shutil.copytree(pristine_libs, staging_root / DATAFORGE_PATCHED_DIR / "libs")
         finalize_callback(staging_root)
@@ -526,7 +538,7 @@ def extract_dataforge(
         if progress_pct_callback:
             progress_pct_callback(2, TOTAL_PHASES, "Caching entity files…")
 
-        staging_dir = dataforge_cache_dir.with_name(f".{dataforge_cache_dir.name}.staging-{uuid.uuid4().hex}")
+        staging_dir = dataforge_cache_dir.with_name(f".{dataforge_cache_dir.name}.staging-{_transient_suffix()}")
         if staging_dir.exists():
             robust_rmtree(staging_dir)
         staging_dir.mkdir(parents=True, exist_ok=True)

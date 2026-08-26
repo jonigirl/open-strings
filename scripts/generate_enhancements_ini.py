@@ -280,6 +280,47 @@ def _cached_lookup(forge_dir: Path, name: str, builder):
     return value
 
 
+# Building lookups reads the largest DataForge subtrees (entities/scitem can
+# be 20k+ XML files). Running all of them concurrently has been observed to
+# raise SystemError from the C-accelerated XML parser under memory pressure,
+# so lookup-building concurrency is capped lower than the generator's other
+# thread pools regardless of the caller-supplied max_workers.
+LOOKUP_MAX_WORKERS = 3
+
+
+def _run_jobs_with_retry(
+    jobs: dict[str, Callable],
+    max_workers: int,
+    thread_name_prefix: str,
+) -> dict[str, object]:
+    """Run *jobs* concurrently, retrying any job serially once if it fails.
+
+    CPython's C-accelerated XML parser has been observed to raise
+    ``SystemError`` under memory pressure when many large XML trees are
+    parsed concurrently. These failures are non-deterministic and unrelated
+    to any job's own logic. Failed jobs are collected and retried only after
+    the pool has fully drained, so the serial retry actually runs without any
+    other job's concurrent memory pressure.
+    """
+    results: dict[str, object] = {}
+    failed_names: list[str] = []
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix=thread_name_prefix) as pool:
+        futures = {name: pool.submit(fn) for name, fn in jobs.items()}
+        for name, fut in futures.items():
+            try:
+                results[name] = fut.result()
+            except (SystemError, MemoryError) as exc:
+                logger.warning(
+                    f"Job {name!r} failed under concurrency ({type(exc).__name__}: {exc}); "
+                    "will retry serially after the pool drains…"
+                )
+                failed_names.append(name)
+
+    for name in failed_names:
+        results[name] = jobs[name]()
+    return results
+
+
 ENHANCEMENT_SEPARATOR = "\\n\\n--- STATS ---\\n"
 MISSION_SEPARATOR = "\\n\\n<EM3>MISSION DETAILS</EM3>\\n"
 
@@ -2543,11 +2584,10 @@ def main(
         lookup_jobs["reputation"] = _build_reputation
 
     if lookup_jobs:
-        logger.info(f"Building {len(lookup_jobs)} lookups in parallel (workers={min(max_workers, len(lookup_jobs))})…")
+        lookup_workers = min(max_workers, len(lookup_jobs), LOOKUP_MAX_WORKERS)
+        logger.info(f"Building {len(lookup_jobs)} lookups in parallel (workers={lookup_workers})…")
         _flush()
-        with ThreadPoolExecutor(max_workers=min(max_workers, len(lookup_jobs)), thread_name_prefix="lookup") as pool:
-            futures = {name: pool.submit(fn) for name, fn in lookup_jobs.items()}
-            results = {name: fut.result() for name, fut in futures.items()}
+        results = _run_jobs_with_retry(lookup_jobs, lookup_workers, "lookup")
 
         if "vehicle_ammo" in results:
             vehicle_ammo = results["vehicle_ammo"]
@@ -3315,20 +3355,17 @@ def main(
     }
 
     if gen_jobs:
-        logger.info(
-            f"Running {len(gen_jobs)} output generators in parallel (workers={min(max_workers, len(gen_jobs))})…"
-        )
+        gen_workers = min(max_workers, len(gen_jobs))
+        logger.info(f"Running {len(gen_jobs)} output generators in parallel (workers={gen_workers})…")
         _flush()
-        with ThreadPoolExecutor(max_workers=min(max_workers, len(gen_jobs)), thread_name_prefix="gen") as pool:
-            futs = {name: pool.submit(fn) for name, fn in gen_jobs.items()}
-            for name, fut in futs.items():
-                result = fut.result()
-                if name in job_to_enhancement_key:
-                    outputs_by_key[job_to_enhancement_key[name]] = result
-                elif name == "commodity_journal":
-                    out_commodities, out_journal = result
-                    outputs_by_key["commodity_crafting"] = out_commodities
-                    outputs_by_key["journal"] = out_journal
+        results = _run_jobs_with_retry(gen_jobs, gen_workers, "gen")
+        for name, result in results.items():
+            if name in job_to_enhancement_key:
+                outputs_by_key[job_to_enhancement_key[name]] = result
+            elif name == "commodity_journal":
+                out_commodities, out_journal = result
+                outputs_by_key["commodity_crafting"] = out_commodities
+                outputs_by_key["journal"] = out_journal
 
     # ── Apply loc-string workarounds for CIG data bugs ────────────────────────
     # XML patches we ran before this script realigned the enhancement

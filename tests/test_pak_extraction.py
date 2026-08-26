@@ -27,6 +27,7 @@ from src.utils.pak_extractor import (
     _recover_dataforge_cache,
     _recover_dataforge_layer,
     _replace_dataforge_cache,
+    _transient_suffix,
     dataforge_cache_is_fresh,
     extract_dataforge,
     extract_global_ini,
@@ -39,6 +40,24 @@ from src.utils.pak_extractor import (
 @pytest.mark.unit
 class TestDataForgeCache:
     """DataForge cache freshness detection."""
+
+    def test_transient_suffix_is_short(self):
+        """Staging/backup suffixes must stay short to avoid reintroducing MAX_PATH failures."""
+        suffix = _transient_suffix()
+        assert len(suffix) == 8
+        assert all(c in "0123456789abcdef" for c in suffix)
+
+    def test_staging_suffix_leaves_max_path_headroom(self):
+        """A real end-user build failed at 263 chars where the final cache path for the
+        same file was only 221 chars — the previous 32-char uuid4().hex staging suffix
+        added ~42 extra characters over the plain 'dataforge' cache dir name. The
+        suffix must now add far less so deeply nested DataForge XML paths stay under
+        Windows' 260-char MAX_PATH.
+        """
+        cache_dir = Path("C:/Users/segim/AppData/Local/Open Strings/LIVE/cache/dataforge")
+        staging_dir = cache_dir.with_name(f".{cache_dir.name}.staging-{_transient_suffix()}")
+        overhead = len(str(staging_dir)) - len(str(cache_dir))
+        assert overhead < 20
 
     def test_legacy_cache_is_stale_even_when_newer(self):
         """A legacy one-layer cache must migrate through a fresh extraction."""
