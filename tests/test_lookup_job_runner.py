@@ -1,9 +1,7 @@
 """Tests for the concurrent lookup/generator job runner in generate_enhancements_ini.
 
-Covers the retry-on-SystemError behaviour added after real-world reports of
-`SystemError: error return without exception set` from CPython's C-accelerated
-XML parser under memory pressure, and the lower concurrency cap applied to
-DataForge lookup building specifically.
+Covers exception retries, the lookup concurrency cap, and content-based cache
+invalidation. Exception retries do not recover native process crashes.
 """
 
 from __future__ import annotations
@@ -64,3 +62,46 @@ def test_run_jobs_with_retry_propagates_persistent_failure(gen_module):
 def test_lookup_max_workers_caps_concurrency(gen_module):
     """Lookup building must stay capped below the generator's general worker count."""
     assert gen_module.LOOKUP_MAX_WORKERS <= 3
+
+
+@pytest.mark.parametrize("name", ["scitem_lookups", "blueprint_pools", "reputation", "component_tag_fallbacks"])
+@pytest.mark.parametrize("changed_input", ["xml", "localization", "patch", "added_xml", "removed_xml"])
+def test_lookup_cache_tracks_actual_inputs(gen_module, tmp_path, name, changed_input):
+    import os
+
+    records = tmp_path / "raw" / "libs" / "foundry" / "records"
+    records.mkdir(parents=True)
+    xml = records / "example.xml"
+    xml.write_text('<Record value="A"/>', encoding="utf-8")
+    identity = tmp_path / gen_module.DATAFORGE_IDENTITY_FILE
+    identity.write_text('{"patch_fingerprint":"A"}', encoding="utf-8")
+    (tmp_path / ".p4k_mtime").write_text("unchanged", encoding="utf-8")
+    loc = {"item_name": "Item A", "item_desc": "Size: 1"}
+    calls = []
+
+    def builder():
+        calls.append(True)
+        return len(calls)
+
+    def lookup():
+        return gen_module._cached_lookup(
+            tmp_path, name, builder, dependency_key=gen_module._dataforge_cache_key(tmp_path, loc)
+        )
+
+    assert lookup() == 1
+    assert lookup() == 1
+    if changed_input in {"xml", "patch"}:
+        path = xml if changed_input == "xml" else identity
+        before = path.stat()
+        path.write_text(path.read_text(encoding="utf-8").replace('"A"', '"B"'), encoding="utf-8")
+        os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+        assert path.stat().st_size == before.st_size
+    elif changed_input == "localization":
+        loc["item_name"] = "Item B"
+        loc["item_desc"] = "Size: 2"
+    elif changed_input == "added_xml":
+        (records / "added.xml").write_text("<Record/>", encoding="utf-8")
+    else:
+        xml.unlink()
+    assert lookup() == 2
+    assert lookup() == 2

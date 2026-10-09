@@ -9,17 +9,20 @@ from PyQt6.QtGui import QColor, QFont, QTextCharFormat, QTextCursor
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDialog,
     QFileDialog,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
     QPushButton,
+    QStyle,
     QVBoxLayout,
     QWidget,
 )
 
 # Maximum lines kept in the viewer before oldest lines are dropped
 _MAX_LINES = 2000
+_POPOUT_SIZE = (960, 600)
 
 # Colours per level
 _LEVEL_COLORS = {
@@ -70,6 +73,7 @@ class LogTab(QWidget):
     def __init__(self):
         super().__init__()
         self._line_count = 0
+        self._popout: QDialog | None = None
         self._emitter = _LogEmitter()
         self._handler = _QtLogHandler(self._emitter)
         self._handler.setFormatter(
@@ -82,7 +86,15 @@ class LogTab(QWidget):
     # ── UI ────────────────────────────────────────────────────────────────────
 
     def setup_ui(self):
-        layout = QVBoxLayout(self)
+        self._tab_layout = QVBoxLayout(self)
+        self._tab_layout.setContentsMargins(0, 0, 0, 0)
+        self._content = QWidget(self)
+        self._tab_layout.addWidget(self._content)
+        self._return_btn = QPushButton("Return Log to Tab", self)
+        self._return_btn.clicked.connect(self._return_to_tab)
+        self._return_btn.hide()
+        self._tab_layout.addWidget(self._return_btn)
+        layout = QVBoxLayout(self._content)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(6)
 
@@ -116,6 +128,12 @@ class LogTab(QWidget):
 
         toolbar.addStretch()
 
+        self._popout_btn = QPushButton("Pop Out")
+        self._popout_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_TitleBarMaxButton))
+        self._popout_btn.setToolTip("Move the live log into a separate window")
+        self._popout_btn.clicked.connect(self._toggle_popout)
+        toolbar.addWidget(self._popout_btn)
+
         clear_btn = QPushButton("Clear")
         clear_btn.setMaximumWidth(70)
         clear_btn.clicked.connect(self._clear)
@@ -132,7 +150,8 @@ class LogTab(QWidget):
         self._view = QPlainTextEdit()
         self._view.setReadOnly(True)
         self._view.setMaximumBlockCount(_MAX_LINES)
-        self._view.setFont(QFont("Consolas", 9))
+        self._view.setFont(QFont("Consolas", 11))
+        self._view.setAccessibleName("Application log")
         self._view.setStyleSheet("QPlainTextEdit { background: #1e1e1e; color: #cccccc; border: none; }")
         # Disable the default word-wrap so long lines scroll horizontally
         self._view.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
@@ -141,8 +160,40 @@ class LogTab(QWidget):
         # Status bar
         self._status_label = QLabel("0 lines")
         self._status_label.setProperty("role", "secondary")
-        self._status_label.setStyleSheet("font-size: 10px;")
         layout.addWidget(self._status_label)
+
+    def _toggle_popout(self):
+        if self._popout is not None:
+            self._return_to_tab()
+            return
+        self._popout = QDialog(self)
+        self._popout.setWindowTitle("Open Strings - Log")
+        self._popout.resize(*_POPOUT_SIZE)
+        self._popout.finished.connect(self._restore_log)
+        layout = QVBoxLayout(self._popout)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._content)
+        self._return_btn.show()
+        self._popout_btn.setText("Return to Tab")
+        self._popout_btn.setToolTip("Return the live log to its tab")
+        self._popout.show()
+        self._view.setFocus()
+
+    def _return_to_tab(self):
+        if self._popout is not None:
+            self._popout.close()
+
+    def _restore_log(self):
+        popout = self._popout
+        self._popout = None
+        self._tab_layout.insertWidget(0, self._content)
+        self._content.show()
+        self._return_btn.hide()
+        self._popout_btn.setText("Pop Out")
+        self._popout_btn.setToolTip("Move the live log into a separate window")
+        self._popout_btn.setFocus()
+        if popout is not None:
+            popout.deleteLater()
 
     # ── Handler lifecycle ─────────────────────────────────────────────────────
 
@@ -154,6 +205,7 @@ class LogTab(QWidget):
     def remove_handler(self):
         """Call on app close to avoid logging to a destroyed widget."""
         logging.getLogger().removeHandler(self._handler)
+        self._return_to_tab()
 
     # ── Slots ─────────────────────────────────────────────────────────────────
 

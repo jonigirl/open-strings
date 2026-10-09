@@ -135,7 +135,9 @@ class EnhancementsTab(QWidget):
         gl.addWidget(self._forge_status_label)
 
         self._operation_label = QLabel()
-        self._operation_label.setStyleSheet("font-size: 10px; color: #2196F3;")
+        self._operation_label.setStyleSheet("font-size: 16px; color: #2196F3;")
+        self._operation_label.setWordWrap(True)
+        self._operation_title = ""
         self._operation_label.setVisible(False)
         gl.addWidget(self._operation_label)
 
@@ -151,7 +153,8 @@ class EnhancementsTab(QWidget):
         self._apply_categories_btn.setEnabled(has_changes)
 
     def _apply_category_changes(self):
-        """Save checkbox states, disable/restore enhancement files, and trigger reload."""
+        """Save category states, preserve disabled files, and regenerate missing outputs."""
+        needs_generation = False
         for key, cb in self._enhancements_checkboxes.items():
             now_enabled = cb.isChecked()
             AppSettings.set_enhancement_category_enabled(key, now_enabled)
@@ -164,21 +167,19 @@ class EnhancementsTab(QWidget):
 
                 if not now_enabled and active_file.exists():
                     try:
-                        active_file.rename(disabled_file)
+                        active_file.replace(disabled_file)
                         logger.info(f"Disabled enhancement file: {filename}")
                     except OSError as e:
                         logger.warning(f"Failed to disable {filename}: {e}")
 
-                elif now_enabled and not active_file.exists() and disabled_file.exists():
-                    try:
-                        disabled_file.rename(active_file)
-                        logger.info(f"Restored enhancement file: {filename}")
-                    except OSError as e:
-                        logger.warning(f"Failed to restore {filename}: {e}")
+                elif now_enabled and not active_file.exists():
+                    needs_generation = True
 
         self._apply_categories_btn.setEnabled(False)
         self.refresh_enhancements_status()
         self.merge_requested.emit()
+        if needs_generation:
+            self.enhancements_pipeline_requested.emit()
 
     @staticmethod
     def _files_for_category(key: str) -> list[str]:
@@ -279,18 +280,26 @@ class EnhancementsTab(QWidget):
     def set_operation_running(self, message: str):
         """Disable the enhancements button and show an inline progress message."""
         self._generate_enhancements_btn.setEnabled(False)
+        self._apply_categories_btn.setEnabled(False)
+        for checkbox in self._enhancements_checkboxes.values():
+            checkbox.setEnabled(False)
         self._operation_label.setText(message)
+        self._operation_title = message
         self._operation_label.setVisible(True)
 
     def set_operation_progress(self, message: str):
         """Update the inline progress message without changing button state."""
-        self._operation_label.setText(message)
+        self._operation_label.setText(f"{self._operation_title}\n{message}")
 
     def set_operation_idle(self):
         """Re-enable the enhancements button and hide the progress message."""
         self._generate_enhancements_btn.setEnabled(True)
+        for checkbox in self._enhancements_checkboxes.values():
+            checkbox.setEnabled(True)
+        self._on_category_checkbox_changed()
         self._operation_label.setVisible(False)
         self._operation_label.setText("")
+        self._operation_title = ""
 
     # ── Status refresh ────────────────────────────────────────────────────────
 

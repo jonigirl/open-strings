@@ -5,14 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.2] - 2026-10-09
+
+### Added
+
+- A non-modal log pop-out window that returns to the Log tab when closed.
+- Filters for every String Editor column, with Contains, Exact, Starts with, and
+  Excludes modes for text columns.
+- Temporary mission blueprint access and success-only vehicle rental rewards,
+  with rental duration kept separate from permanent item ownership.
+- A pinned patched unforge exporter that retains shared-path record bodies,
+  encodes invalid XML record names, and supplies a validated completion manifest.
+
+### Fixed
+
+- Extraction and generation failures no longer mark incomplete enhancements as current.
+- Lookup caches now detect changed localization, XML content, and patch inputs.
+- Incremental regeneration includes shared data dependencies and UUID sidecars.
+- Re-enabled categories regenerate instead of restoring obsolete outputs.
+- Ship flight statistics use explicit loadout-controller references as a fallback.
+- Mission reward names include retained spaceship, ground vehicle, and ATLS records.
+- Export integrity is checked before cache activation; recovered records use original
+  metadata rather than their UUID filenames.
+- No-op generation avoids unnecessary editor reloads; column-filter timers disconnect
+  safely during widget destruction.
+- Bundled-tool installation avoids requesting an unpublished download URL
+  and does not mark failed or cancelled installations as ready.
+- Progress dialogs stay bounded and wrap messages. Cache health checks report
+  their own progress instead of displaying a completed patch filename.
+
+### Changed
+
+- The extraction-tool and capture updates require one cache rebuild per channel.
+  Existing user overrides remain intact.
+- DataForge exports show live record progress, with a two-hour overall limit and
+  a 30-minute no-output limit. Timeout failures include recent diagnostics.
+- First-extraction messages allow for runs of 30 minutes or longer rather than
+  promising completion within a few minutes.
+
 ## [1.5.1] - 2026-08-27
 
 ### Fixed
 
 - DataForge cache staging no longer produces file paths long enough to exceed
   Windows' path length limit during extraction.
-- Enhancement generation now recovers from rare, memory-pressure-related XML
-  parsing failures instead of crashing.
+- Enhancement generation retries catchable XML-processing failures once after
+  concurrent work finishes. This does not recover native process crashes.
 
 ## [1.5.0] - 2026-08-18
 

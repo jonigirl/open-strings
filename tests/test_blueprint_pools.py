@@ -51,6 +51,35 @@ def _pool_xml(ref: str, bp_refs: list[str]) -> str:
     return f'<BlueprintPoolRecord __ref="{ref}"><blueprintRewards>{rewards}</blueprintRewards></BlueprintPoolRecord>'
 
 
+@pytest.mark.parametrize("entity_names", [{"missing": "Named item"}, {}, None])
+def test_blueprint_sidecars_use_canonical_filename_fallbacks(gen_module, tmp_path, entity_names):
+    blueprint_dir = tmp_path / "blueprints"
+    pool_dir = tmp_path / "pools"
+    blueprint = _bp_xml("blueprint", "missing").replace(
+        '__ref="blueprint"',
+        '__ref="blueprint" __type="CraftingBlueprintRecord" __path="libs/blueprints/bp_craft_example_item.xml"',
+    )
+    pool = _pool_xml("pool", ["blueprint"]).replace(
+        '__ref="pool"',
+        '__ref="pool" __type="BlueprintPoolRecord" __path="libs/pools/bp_rewards_examplerank2.xml"',
+    )
+    _write_xml(blueprint_dir / "uuid.xml", blueprint)
+    _write_xml(pool_dir / "uuid.xml", pool)
+    _write_xml(
+        blueprint_dir / "ancillary.xml",
+        blueprint.replace('"CraftingBlueprintRecord"', '"ResourceType"').replace('"blueprint"', '"ancillary"'),
+    )
+    _write_xml(
+        pool_dir / "ancillary.xml",
+        pool.replace('"BlueprintPoolRecord"', '"ResourceTypeGroup"').replace('"pool"', '"ancillary"'),
+    )
+    filenames = {"bp_craft_example_item": "Filename item"} if entity_names is not None else {}
+    items, names = gen_module.build_blueprint_pool_lookup(pool_dir, blueprint_dir, entity_names or {}, filenames)
+    expected = "Named item" if entity_names else "Filename item" if filenames else "Example Item"
+    assert items == {"pool": [expected]}
+    assert names == {"pool": "examplerank2"}
+
+
 def _contractgen_xml(title_key: str, system: str, pool_uuid: str) -> str:
     return f"""<?xml version="1.0" encoding="utf-8"?>
 <ContractGenerator>
@@ -65,9 +94,183 @@ def _contractgen_xml(title_key: str, system: str, pool_uuid: str) -> str:
 """
 
 
+@pytest.mark.parametrize("changed_input", ["localization", "xml"])
+def test_generation_refreshes_cached_blueprint_names_and_tags(gen_module, tmp_path, changed_input):
+    import os
+
+    forge = tmp_path / "forge"
+    records = forge / "raw/libs/foundry/records"
+    item = records / "entities/scitem/example.xml"
+    _write_xml(item, '<Entity __ref="item-ref"><Localization Name="@item_a" Description="@desc_a"/></Entity>')
+    _write_xml(records / "crafting/blueprints/crafting/example.xml", _bp_xml("bp-ref", "item-ref"))
+    _write_xml(records / "crafting/blueprintrewards/example.xml", _pool_xml("pool-ref", ["bp-ref"]))
+    _write_xml(
+        records / "contracts/contractgenerator/example.xml", _contractgen_xml("mission_title", "Stanton", "pool-ref")
+    )
+    base = tmp_path / "base.ini"
+    base.write_text(
+        "mission_title=Example mission\nmission_title_desc=Example description\n"
+        "item_a=Item Alpha\nitem_b=Item Bravo\n"
+        "desc_a=Size: S1\\nGrade: A\\nClass: Military\n"
+        "desc_b=Size: S2\\nGrade: B\\nClass: Military\n",
+        encoding="utf-8",
+    )
+    (forge / ".p4k_mtime").write_text("unchanged", encoding="utf-8")
+    gen_module.main(base, forge, categories={"mission_rewards"}, max_workers=1)
+    output_path = tmp_path / "mission_rewards_enhancements.ini"
+    first = gen_module.parse_ini(output_path)["mission_title_desc"]
+    assert "Item Alpha [S1-A]" in first
+    source = base if changed_input == "localization" else item
+    before = source.stat()
+    if changed_input == "localization":
+        source.write_text(
+            source.read_text(encoding="utf-8")
+            .replace("Item Alpha", "Item Bravo")
+            .replace("desc_a=Size: S1\\nGrade: A", "desc_a=Size: S2\\nGrade: B"),
+            encoding="utf-8",
+        )
+    else:
+        source.write_text(
+            '<Entity __ref="item-ref"><Localization Name="@item_b" Description="@desc_b"/></Entity>', encoding="utf-8"
+        )
+    os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert source.stat().st_size == before.st_size
+    gen_module.main(base, forge, categories={"mission_rewards"}, max_workers=1)
+    second = gen_module.parse_ini(output_path)["mission_title_desc"]
+    assert "Item Bravo [S2-B]" in second
+    assert "Item Alpha" not in second
+
+
 # ---------------------------------------------------------------------------
 # TestMultiSourcePoolMerge — scan_contract_generators 3-level structure
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("enabled", ["1", "0", "false", ""])
+@pytest.mark.parametrize("pool_known", [True, False])
+def test_temporary_blueprints_are_not_permanent_rewards(gen_module, tmp_path, enabled, pool_known, caplog):
+    cg = tmp_path / "cg"
+    _write_xml(
+        cg / "example.xml",
+        _contractgen_xml("example_title", "Stanton", "permanent-pool").replace(
+            '<BlueprintRewards blueprintPool="permanent-pool"/>',
+            f'<paramOverrides><modifierOverrides><MissionModifier_TemporaryBlueprint enabled="{enabled}" '
+            'modifierName="example" blueprintPool="temporary-pool"/></modifierOverrides></paramOverrides>',
+        ),
+    )
+    temporary = {}
+    missions, permanent, chances, _ = gen_module.scan_contract_generators(
+        cg,
+        blueprint_pools={"temporary-pool": ["Example Item"]} if pool_known else {},
+        temporary_blueprints=temporary,
+    )
+    assert not missions["example_title"][0][8]
+    assert not permanent
+    assert not chances
+    if enabled == "1" and pool_known:
+        assert temporary == {"example_title": {"example_title_desc": {"Stanton": {"": ["Example Item"]}}}}
+    else:
+        assert not temporary
+    if enabled == "1" and not pool_known:
+        assert "Unresolved temporary blueprint pool" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "minutes, expected",
+    [
+        ("7200", " (120 hours)"),
+        ("60", " (1 hour)"),
+        ("90", " (1.5 hours)"),
+        ("bad", ""),
+        ("", ""),
+        ("NaN", ""),
+        ("inf", ""),
+        ("-1", ""),
+        ("0", ""),
+    ],
+)
+def test_vehicle_rental_duration(gen_module, tmp_path, minutes, expected):
+    cg = tmp_path / "cg"
+    _write_xml(
+        cg / "example.xml",
+        _contractgen_xml("example_title", "Stanton", "pool").replace(
+            '<BlueprintRewards blueprintPool="pool"/>',
+            "<contractResults><contractResults>"
+            f'<ContractResult_VehicleRental vehicleEntityClass="vehicle-ref" durationMinutes="{minutes}">'
+            '<missionResults><Bool value="1"/><Bool value="0"/></missionResults>'
+            "</ContractResult_VehicleRental></contractResults></contractResults>",
+        ),
+    )
+    rentals = {}
+    gen_module.scan_contract_generators(cg, entity_names={"vehicle-ref": "Example Vehicle"}, vehicle_rentals=rentals)
+    assert rentals == {"example_title": {"example_title_desc": {"Stanton": ["Example Vehicle" + expected]}}}
+
+
+@pytest.mark.parametrize("outcome, known", [("0", True), ("", True), ("1", False)])
+def test_vehicle_rental_omits_failure_and_unknown_vehicle(gen_module, tmp_path, outcome, known, caplog):
+    cg = tmp_path / "cg"
+    flags = f'<missionResults><Bool value="{outcome}"/><Bool value="1"/></missionResults>' if outcome else ""
+    _write_xml(
+        cg / "example.xml",
+        _contractgen_xml("example_title", "Stanton", "pool").replace(
+            '<BlueprintRewards blueprintPool="pool"/>',
+            '<contractResults><contractResults><ContractResult_VehicleRental vehicleEntityClass="unknown-ref" '
+            f'durationMinutes="60">{flags}</ContractResult_VehicleRental></contractResults></contractResults>',
+        ),
+    )
+    rentals = {}
+    gen_module.scan_contract_generators(
+        cg, entity_names={"unknown-ref": "Example Vehicle"} if known else {}, vehicle_rentals=rentals
+    )
+    assert not rentals
+    if not known:
+        assert "Unresolved vehicle rental" in caplog.text
+
+
+def test_generation_keeps_temporary_and_rental_sections_description_scoped(gen_module, tmp_path):
+    forge = tmp_path / "forge"
+    records = forge / "raw/libs/foundry/records"
+    _write_xml(
+        records / "entities/scitem/example.xml", '<Entity __ref="item-ref"><Localization Name="@item_name"/></Entity>'
+    )
+    _write_xml(records / "crafting/blueprints/crafting/example.xml", _bp_xml("bp-ref", "item-ref"))
+    _write_xml(records / "crafting/blueprintrewards/example.xml", _pool_xml("pool-ref", ["bp-ref"]))
+    _write_xml(
+        records / "entities/spaceships/example.xml",
+        '<Entity __ref="vehicle-ref"><VehicleComponentParams vehicleName="@vehicle_name"/></Entity>',
+    )
+    temporary = '<paramOverrides><modifierOverrides><MissionModifier_TemporaryBlueprint enabled="1" blueprintPool="pool-ref"/></modifierOverrides></paramOverrides>'
+    rental = '<contractResults><contractResults><ContractResult_VehicleRental vehicleEntityClass="vehicle-ref" durationMinutes="60"><missionResults><Bool value="1"/></missionResults></ContractResult_VehicleRental></contractResults></contractResults>'
+    _write_xml(
+        records / "contracts/contractgenerator/temporary.xml",
+        _contractgen_xml("example_title", "Stanton", "pool-ref").replace(
+            '<BlueprintRewards blueprintPool="pool-ref"/>', temporary + rental
+        ),
+    )
+    _write_xml(
+        records / "contracts/contractgenerator/plain.xml",
+        _contractgen_xml("example_title", "Pyro", "missing").replace("@example_title_desc", "@plain_desc"),
+    )
+    _write_xml(
+        records / "contracts/contractgenerator/permanent.xml",
+        _contractgen_xml("permanent_title", "Stanton", "pool-ref"),
+    )
+    base = tmp_path / "base.ini"
+    base.write_text(
+        "example_title=Example mission\nexample_title_desc=Example description\nplain_desc=Plain description\npermanent_title=Permanent mission\npermanent_title_desc=Permanent description\nitem_name=Example Item\nvehicle_name=Example Vehicle\n",
+        encoding="utf-8",
+    )
+    gen_module.main(base, forge, categories={"mission_rewards"}, max_workers=1)
+    output = gen_module.parse_ini(tmp_path / "mission_rewards_enhancements.ini")
+    assert "[BP]" not in output["example_title"] and "[BP?]" not in output["example_title"]
+    assert "TEMPORARY BLUEPRINT ACCESS" in output["example_title_desc"]
+    assert "Example Item" in output["example_title_desc"]
+    assert "VEHICLE RENTAL REWARDS" in output["example_title_desc"]
+    assert "Example Vehicle (1 hour)" in output["example_title_desc"]
+    assert "POTENTIAL BLUEPRINTS" not in output["example_title_desc"]
+    assert "TEMPORARY" not in output["plain_desc"] and "RENTAL" not in output["plain_desc"]
+    assert "[BP]" in output["permanent_title"]
+    assert "POTENTIAL BLUEPRINTS" in output["permanent_title_desc"]
 
 
 @pytest.mark.unit

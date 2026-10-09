@@ -1,0 +1,179 @@
+diff --git a/src/unforge/ComplexTypes/DataForgeRecordDefinition.cs b/src/unforge/ComplexTypes/DataForgeRecordDefinition.cs
+--- a/src/unforge/ComplexTypes/DataForgeRecordDefinition.cs
++++ b/src/unforge/ComplexTypes/DataForgeRecordDefinition.cs
+@@ -12,12 +12,18 @@ namespace unforge
+ 		public String DevTeamName { get => this.StreamReader.ReadBlobAtOffset(this.DevTeamNameOffset); }
+ 		public DataForgeStructDefinition StructDefinition { get => this.StreamReader.ReadStructDefinitionAtIndex(this.StructIndex); }
+ 
++		public static String XmlName(String name)
++		{
++			try { return XmlConvert.VerifyNCName(name); }
++			catch (XmlException) { return XmlConvert.EncodeLocalName(name); }
++		}
+ 
+ 		public XmlElement ReadAsXml(XmlNode xmlNode = null)
+ 		{
+ 			// Ensure top level node for record
+-			if (xmlNode is XmlDocument xmlDocument) xmlNode = xmlDocument.CreateElement(this.Name);
+-			else if (xmlNode is XmlElement xmlRoot) xmlNode = xmlRoot.OwnerDocument.CreateElement(this.Name);
++			var encodedName = XmlName(this.Name);
++			if (xmlNode is XmlDocument xmlDocument) xmlNode = xmlDocument.CreateElement(encodedName);
++			else if (xmlNode is XmlElement xmlRoot) xmlNode = xmlRoot.OwnerDocument.CreateElement(encodedName);
+ 
+ 			var xmlElement = xmlNode as XmlElement;
+ 			
+@@ -30,6 +36,7 @@ namespace unforge
+ 			xmlElement.AddAttribute("__type", this.StructDefinition.Name);
+ 			xmlElement.AddAttribute("__ref", this.Hash);
+ 			xmlElement.AddAttribute("__path", this.FileName);
++			if (encodedName != this.Name) xmlElement.AddAttribute("__recordName", this.Name);
+ 			if (this.StreamReader.FileVersion >= 8)
+ 			{
+ 				xmlElement.AddAttribute("__team", this.DevTeamName);
+diff --git a/src/unforge/ComplexTypes/DataForgeStructDefinition.cs b/src/unforge/ComplexTypes/DataForgeStructDefinition.cs
+--- a/src/unforge/ComplexTypes/DataForgeStructDefinition.cs
++++ b/src/unforge/ComplexTypes/DataForgeStructDefinition.cs
+@@ -91,7 +91,11 @@ namespace unforge
+ 					yield return xmlNode;
+ 				}
+ 
+-				if (++i >= DataForge.MaxNodes) yield break;
++				if (++i >= DataForge.MaxNodes)
++				{
++					this.StreamReader.Note("property_node_limit");
++					yield break;
++				}
+ 			}
+ 		}
+ 
+@@ -182,7 +186,7 @@ namespace unforge
+ 					case EDataType.varBoolean: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, this.StreamReader.ReadByte());
+ 					case EDataType.varSingle: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, this.StreamReader.ReadSingle());
+ 					case EDataType.varDouble: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, this.StreamReader.ReadDouble());
+-					case EDataType.varGuid: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, this.StreamReader.ReadGuid(false));
++					case EDataType.varGuid: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, Dolkens.Framework.BinaryExtensions.ExtensionMethods.ReadGuid(this.StreamReader, false));
+ 					case EDataType.varInt8: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, this.StreamReader.ReadSByte());
+ 					case EDataType.varInt16: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, this.StreamReader.ReadInt16());
+ 					case EDataType.varInt32: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, this.StreamReader.ReadInt32());
+@@ -210,7 +214,11 @@ namespace unforge
+ 			{
+ 				yield return this.ReadArrayValueAsXml(parentNode, propertyDefinition, firstIndex, i);
+ 				
+-				if (i >= (DataForge.MaxNodes - 1)) break;
++				if (i >= (DataForge.MaxNodes - 1))
++				{
++					if (arrayCount > DataForge.MaxNodes) this.StreamReader.Note("array_node_limit");
++					break;
++				}
+ 			}
+ 		}
+ 
+diff --git a/src/unforge/DataForge.cs b/src/unforge/DataForge.cs
+--- a/src/unforge/DataForge.cs
++++ b/src/unforge/DataForge.cs
+@@ -22,6 +22,11 @@ namespace unforge
+ 		public static Int32 MaxReferenceDepth { get; set; } = 1;
+ 		public static Int32 MaxPointerDepth { get; set; } = 100;
+ 		public static Int32 MaxNodes { get; set; } = 10000;
++		public Dictionary<String, Int32> Diagnostics { get; } = new Dictionary<String, Int32>();
++		public void Note(String reason)
++		{
++			this.Diagnostics[reason] = this.Diagnostics.TryGetValue(reason, out var count) ? count + 1 : 1;
++		}
+ 
+ 		public Int32 FileVersion { get; }
+ 		public Int64 Length { get => this.BaseStream.Length; }
+@@ -263,7 +268,16 @@ namespace unforge
+ 		{
+ 			var position = this.Position;
+ 
+-			if (this.StructStack.Count > DataForge.MaxPointerDepth || this.StructStack.Contains((structIndex, variantIndex))) return null;
++			if (this.StructStack.Count > DataForge.MaxPointerDepth)
++			{
++				this.Note("pointer_depth");
++				return null;
++			}
++			if (this.StructStack.Contains((structIndex, variantIndex)))
++			{
++				this.Note("struct_cycle");
++				return null;
++			}
+ 
+ 			try
+ 			{
+@@ -303,10 +317,18 @@ namespace unforge
+ 				if (childNode is XmlAttribute attribute) xmlNode.Attributes.Append(attribute);
+ 				else if (childNode is XmlElement element) xmlNode.AppendChild(element);
+ 
+-				if (++i >= DataForge.MaxNodes) break;
++				if (++i >= DataForge.MaxNodes)
++				{
++					this.Note("struct_node_limit");
++					break;
++				}
+ 			}
+ 
+-			if (xmlNode.ChildNodes.Count == 0 && xmlNode.Attributes.Count == 0) return null;
++			if (xmlNode.ChildNodes.Count == 0 && xmlNode.Attributes.Count == 0)
++			{
++				this.Note("empty_structure");
++				return null;
++			}
+ 
+ 			return xmlNode;
+ 		}
+@@ -773,7 +795,16 @@ namespace unforge
+ 		{
+ 			var position = this.Position;
+ 
+-			if (this.RecordStack.Count > DataForge.MaxReferenceDepth || this.RecordStack.Contains(recordIndex)) return null;
++			if (this.RecordStack.Count > DataForge.MaxReferenceDepth)
++			{
++				this.Note("reference_depth");
++				return null;
++			}
++			if (this.RecordStack.Contains(recordIndex))
++			{
++				this.Note("record_cycle");
++				return null;
++			}
+ 
+ 			try
+ 			{
+@@ -852,24 +883,7 @@ namespace unforge
+ 
+ 		public void Save(String filename)
+ 		{
+-			foreach (var fileReference in this.PathToRecordMap.Keys)
+-			{
+-				var node = this.ReadRecordByPathAsXml(fileReference);
+-
+-				if (node == null) continue;
+-
+-				var newPath = Path.Combine(Path.GetDirectoryName(filename), fileReference);
+-
+-				if (!Directory.Exists(Path.GetDirectoryName(newPath))) Directory.CreateDirectory(Path.GetDirectoryName(newPath));
+-
+-
+-				using (var fileStream= File.OpenWrite(newPath))
+-				using (var writer = XmlWriter.Create(fileStream, _xmlSettings))
+-				{
+-					node.WriteTo(writer);
+-					writer.Flush();
+-				}
+-			}
++			RecordExporter.Save(this, filename);
+ 		}
+ 	}
+ }
+diff --git a/src/unforge.cli/Program.cs b/src/unforge.cli/Program.cs
+--- a/src/unforge.cli/Program.cs
++++ b/src/unforge.cli/Program.cs
+@@ -105,6 +105,7 @@ namespace unforge.cli
+ 			catch (Exception ex)
+ 			{
+ 				Console.WriteLine("Error converting {0}: {1}", path, ex.Message);
++				Environment.ExitCode = 1;
+ 			}
+ 		}
+ 	}

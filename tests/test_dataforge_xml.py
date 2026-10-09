@@ -1,9 +1,53 @@
 """Tests for src/utils/dataforge_xml.py"""
 
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 import pytest
 from src.utils import dataforge_xml
+
+
+@pytest.mark.parametrize(
+    "canonical", ["libs/foundry/records/items/example.xml", r"libs\foundry\records\items\example.xml"]
+)
+def test_record_stem_uses_original_path(canonical):
+    root = ET.Element("EntityClassDefinition.Example", {"__path": canonical})
+    assert dataforge_xml.record_stem(root, Path("uuid.xml")) == "example"
+
+
+@pytest.mark.parametrize(
+    ("tag", "attributes", "expected"),
+    [
+        (
+            "EntityClassDefinition.Example_x0020_Name",
+            {"__recordName": "EntityClassDefinition.Example Name"},
+            "Example Name",
+        ),
+        ("EntityClassDefinition.Literal_x0020_Name", {}, "Literal_x0020_Name"),
+        ("item", {"__path": "libs/items/example.xml"}, "example"),
+        ("Example", {"__type": "EntityClassDefinition", "__path": "libs/items/shared.xml"}, "Example"),
+        ("item", {}, "uuid"),
+    ],
+)
+def test_record_class_name_preserves_original_identity(tag, attributes, expected):
+    assert dataforge_xml.record_class_name(ET.Element(tag, attributes), Path("uuid.xml")) == expected
+
+
+@pytest.mark.parametrize("record_type", ["EntityClassDefinition", "SEntityClassDefinition", None])
+def test_entity_record_accepts_entities_and_legacy(record_type):
+    root = ET.Element("item", {} if record_type is None else {"__type": record_type})
+    assert dataforge_xml.is_entity_record(root)
+
+
+def test_entity_record_rejects_nonentity_despite_entity_tag():
+    root = ET.Element("EntityClassDefinition.Example", {"__type": "UseChannelArchetype"})
+    assert not dataforge_xml.is_entity_record(root)
+
+
+def test_record_type_uses_authoritative_metadata():
+    root = ET.Element("CraftingBlueprintRecord.Example", {"__type": "ResourceType"})
+    assert not dataforge_xml.is_record_type(root, "CraftingBlueprintRecord")
+    assert dataforge_xml.is_record_type(root, "ResourceType")
 
 
 @pytest.fixture

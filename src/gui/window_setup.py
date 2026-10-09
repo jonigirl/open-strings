@@ -259,9 +259,12 @@ def create_strings_tab(parent: MainWindow) -> QWidget:
     parent.table.setModel(parent._model)
 
     column_names = ["Category", "Key", "Default Value", "Current Value", "★", "Custom Value", "Status"]
-    parent.filter_header = FilterHeaderView(column_names, parent.table, skip_columns={0, 4, 6})
+    parent.filter_header = FilterHeaderView(column_names, parent.table, choice_columns={0, 4, 6})
     parent.table.setHorizontalHeader(parent.filter_header)
     parent.filter_header.filter_changed.connect(parent.apply_filters)
+    parent.table.horizontalScrollBar().valueChanged.connect(parent.filter_header._position_editors)
+    parent.filter_header.set_filter_choices(0, ["Commodities", "Missions", "Other", "Ship Items", "Ships"])
+    parent.filter_header.set_filter_choices(6, ["Enhanced", "Modified", "New", "Unmodified"])
 
     parent.table.setAlternatingRowColors(True)
     parent.table.setSortingEnabled(True)

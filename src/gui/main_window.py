@@ -1338,7 +1338,9 @@ class MainWindow(QMainWindow):
         self.enhancements_tab.refresh_enhancements_status()
 
         status_bar = self._status_bar()
-        if success:
+        if success and not self.worker_coord.enhancements_changed:
+            status_bar.showMessage("Enhancements already up to date")
+        elif success:
             status_bar.showMessage("Enhancements generated — reloading entries…")
             self.worker_coord.start_file_loading("Reloading strings with updated enhancements…")
         else:
@@ -1419,6 +1421,7 @@ class MainWindow(QMainWindow):
             hide_unmodified=self.hide_unmodified_check.isChecked(),
             favorites_only=self.favorites_only_check.isChecked(),
             favorite_prefix=AppSettings.get_favorite_prefix(),
+            column_filter_modes=self.filter_header.get_filter_modes(),
         )
 
     @timed
@@ -1440,6 +1443,10 @@ class MainWindow(QMainWindow):
         self.category_combo.addItem("All")
         self.category_combo.addItems(categories)
         self.category_combo.blockSignals(False)
+        self.filter_header.set_filter_choices(0, categories)
+        self.filter_header.set_filter_choices(
+            6, sorted({"Enhanced", "Modified", "New", "Unmodified"} | {e.status for e in self.entries})
+        )
 
     def _entry_index_for_row(self, row: int) -> int:
         """Map a visual table row to an index into self.entries."""

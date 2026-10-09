@@ -10,6 +10,27 @@ extracted DataForge cache directories.
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+from pathlib import Path, PureWindowsPath
+
+
+def record_stem(root: ET.Element, xml_file: Path) -> str:
+    return PureWindowsPath(root.get("__path") or xml_file.name).stem
+
+
+def record_class_name(root: ET.Element, xml_file: Path) -> str:
+    name = root.get("__recordName") or root.tag
+    if "." in name:
+        return name.split(".", 1)[1]
+    return name if root.get("__type") or root.get("__recordName") else record_stem(root, xml_file)
+
+
+def is_record_type(root: ET.Element, *type_names: str) -> bool:
+    record_type = root.get("__type")
+    return record_type is None or record_type in type_names
+
+
+def is_entity_record(root: ET.Element) -> bool:
+    return is_record_type(root, "EntityClassDefinition", "SEntityClassDefinition")
 
 
 def find(root: ET.Element, tag: str) -> ET.Element | None:

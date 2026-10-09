@@ -287,6 +287,38 @@ class TestDataforgeExtraction:
 
 
 class TestEnhancementsGeneration:
+    def test_noop_finishes_without_marking_outputs_changed(self, qtbot):
+        coord, _ = _make_coordinator(qtbot)
+        coord._enhancements_worker = _mock_worker()
+        coord._enhancements_worker.categories = set()
+        results = []
+        coord.enhancements_finished.connect(results.append)
+        coord._on_enhancements_done(True)
+        assert results == [True]
+        assert coord.enhancements_changed is False
+
+    def test_successful_generation_marks_outputs_changed(self, qtbot):
+        coord, _ = _make_coordinator(qtbot)
+        coord._enhancements_worker = _mock_worker()
+        coord._enhancements_worker.categories = {"ship_descs"}
+        coord._on_enhancements_done(True)
+        assert coord.enhancements_changed is True
+
+    def test_noop_completion_does_not_reload_strings(self):
+        from types import SimpleNamespace
+
+        from src.gui.main_window import MainWindow
+
+        status_bar = MagicMock()
+        window = SimpleNamespace(
+            enhancements_tab=MagicMock(),
+            worker_coord=SimpleNamespace(enhancements_changed=False, start_file_loading=MagicMock()),
+            _status_bar=lambda: status_bar,
+        )
+        MainWindow._on_enhancements_generation_finished(window, True)
+        window.worker_coord.start_file_loading.assert_not_called()
+        status_bar.showMessage.assert_called_once_with("Enhancements already up to date")
+
     def test_patch_only_staleness_starts_generation_without_extraction(self, qtbot):
         coord, _ = _make_coordinator(qtbot)
         coord.start_enhancements_generation = MagicMock()

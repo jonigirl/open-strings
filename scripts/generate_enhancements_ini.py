@@ -17,8 +17,10 @@ Usage:
   python scripts/generate_enhancements_ini.py [base_ini_path [dataforge_cache_dir]]
 """
 
+import hashlib
 import json
 import logging
+import math
 import os
 import pickle
 import re
@@ -31,14 +33,21 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from src.utils import enhancement_formatters as _enh_formatters
+from src.utils.dataforge_diff import _build_snapshot
 from src.utils.dataforge_xml import attr as _attr
 from src.utils.dataforge_xml import find as _find
+from src.utils.dataforge_xml import is_entity_record as _is_entity_record
+from src.utils.dataforge_xml import is_record_type as _is_record_type
 from src.utils.dataforge_xml import poly_type as _poly_type
+from src.utils.dataforge_xml import record_class_name as _record_class_name
+from src.utils.dataforge_xml import record_stem as _record_stem
 from src.utils.file_utils import atomic_write_text
 from src.utils.formatting import NULL_UUID
 from src.utils.formatting import fmt as _fmt
+from src.utils.pak_extractor import DATAFORGE_IDENTITY_FILE
 
 logger = logging.getLogger(__name__)
+MINUTES_PER_HOUR = 60
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
@@ -163,19 +172,6 @@ def write_output_batch(output_dir: Path, files: dict[str, str]) -> None:
 
 
 # ── Derived-lookup disk cache ─────────────────────────────────────────────────
-# Walking the DataForge tree is expensive (~85s for scitem alone). These
-# lookups are pure functions of the DataForge cache contents, so we pickle
-# them under cache/dataforge/.lookups/ keyed on the .p4k_mtime stamp written
-# by pak_extractor.py. When DataForge is re-extracted, the stamp changes and
-# the cache is invalidated automatically.
-
-# Per-cache builder version. Bump the value whenever the builder for that
-# cache changes its WHAT-it-collects semantics (new source dirs, schema
-# additions, etc.) so existing pickled results from before the change get
-# detected as stale and rebuilt — the .p4k_mtime fingerprint alone can't
-# catch this because the underlying DataForge data hasn't changed, only
-# our parsing of it has.
-#
 # History:
 #   blueprint_pools v2 (1.3.1) — walks all crafting/blueprintrewards/
 #     subdirs (was: only blueprintmissionpools/). Adds ~40 new pool
@@ -220,43 +216,38 @@ def write_output_batch(output_dir: Path, files: dict[str, str]) -> None:
 #     Rank 2–3, Rank 4) from the pool filename. v7 pickles unpack as
 #     a bare dict and would crash the new 2-tuple consumer.
 _LOOKUP_VERSIONS: dict[str, str] = {
-    "blueprint_pools": "v8",
-    "scitem_lookups": "v5",
-    "component_tag_fallbacks": "v1",
+    "blueprint_pools": "v9",
+    "scitem_lookups": "v6",
+    "component_tag_fallbacks": "v2",
 }
 
 
-def _dataforge_cache_key(forge_dir: Path) -> str:
-    """Return a stable fingerprint for the current DataForge cache.
-
-    Uses the .p4k_mtime stamp file written by pak_extractor. Falls back to
-    the records directory mtime so the cache is still key-able if the stamp
-    is missing (e.g. manually extracted dataforge).
-    """
-    stamp = forge_dir / ".p4k_mtime"
-    if stamp.exists():
-        try:
-            return stamp.read_text(encoding="utf-8").strip()
-        except OSError:
-            pass
-    records = forge_dir / "raw" / "libs" / "foundry" / "records"
-    if records.exists():
-        return f"mtime:{int(records.stat().st_mtime)}"
-    return "unknown"
+def _dataforge_cache_key(forge_dir: Path, loc: dict[str, str] | None = None) -> str:
+    """Fingerprint current XML content, extraction/patch identity, and localization."""
+    snapshot = _build_snapshot(forge_dir / "raw" / "libs")
+    digest = hashlib.sha256()
+    digest.update(
+        json.dumps({path: entry["sha256"] for path, entry in snapshot.items()}, sort_keys=True).encode("utf-8")
+    )
+    for filename in (".p4k_mtime", DATAFORGE_IDENTITY_FILE):
+        path = forge_dir / filename
+        digest.update(filename.encode("utf-8"))
+        if path.exists():
+            digest.update(path.read_bytes())
+    digest.update(json.dumps(loc, sort_keys=True).encode("utf-8"))
+    return digest.hexdigest()
 
 
-def _cached_lookup(forge_dir: Path, name: str, builder):
+def _cached_lookup(forge_dir: Path, name: str, builder, *, dependency_key: str | None = None):
     """Memoize *builder*'s output to cache/dataforge/.lookups/{name}.pkl.
 
-    Cache key is ``{builder_version}:{dataforge_fingerprint}``. Either side
-    changing invalidates the cache: re-extracting Data.p4k changes the
-    fingerprint; updating the builder's collection logic bumps the version
-    in _LOOKUP_VERSIONS. Pickle errors silently fall back to rebuilding.
+    The builder version and current input content both invalidate stored results.
+    Pickle errors fall back to rebuilding.
     """
     cache_dir = forge_dir / ".lookups"
     cache_file = cache_dir / f"{name}.pkl"
     builder_version = _LOOKUP_VERSIONS.get(name, "v1")
-    key = f"{builder_version}:{_dataforge_cache_key(forge_dir)}"
+    key = f"{builder_version}:{dependency_key or _dataforge_cache_key(forge_dir)}"
 
     if cache_file.exists():
         try:
@@ -280,11 +271,6 @@ def _cached_lookup(forge_dir: Path, name: str, builder):
     return value
 
 
-# Building lookups reads the largest DataForge subtrees (entities/scitem can
-# be 20k+ XML files). Running all of them concurrently has been observed to
-# raise SystemError from the C-accelerated XML parser under memory pressure,
-# so lookup-building concurrency is capped lower than the generator's other
-# thread pools regardless of the caller-supplied max_workers.
 LOOKUP_MAX_WORKERS = 3
 
 
@@ -295,12 +281,8 @@ def _run_jobs_with_retry(
 ) -> dict[str, object]:
     """Run *jobs* concurrently, retrying any job serially once if it fails.
 
-    CPython's C-accelerated XML parser has been observed to raise
-    ``SystemError`` under memory pressure when many large XML trees are
-    parsed concurrently. These failures are non-deterministic and unrelated
-    to any job's own logic. Failed jobs are collected and retried only after
-    the pool has fully drained, so the serial retry actually runs without any
-    other job's concurrent memory pressure.
+    SystemError and MemoryError are retried after the pool drains. Their cause
+    is not assumed; native process crashes cannot be recovered by this retry.
     """
     results: dict[str, object] = {}
     failed_names: list[str] = []
@@ -1159,6 +1141,8 @@ def build_blueprint_pool_lookup(
     for xml_file in bp_dir.rglob("*.xml"):
         try:
             root = ET.parse(xml_file).getroot()
+            if not _is_record_type(root, "CraftingBlueprintRecord"):
+                continue
             ref = root.get("__ref", "")
             if not ref:
                 continue
@@ -1167,8 +1151,12 @@ def build_blueprint_pool_lookup(
                 if _poly_type(elem) == "CraftingProcess_Creation":
                     entity_class = elem.get("entityClass", "")
                     break
-            stem_key = xml_file.stem.lower()
-            bp_entity[ref] = (entity_class, stem_key, _name_from_blueprint_filename(xml_file))
+            stem_key = _record_stem(root, xml_file).lower()
+            bp_entity[ref] = (
+                entity_class,
+                stem_key,
+                _name_from_blueprint_filename(Path(_record_stem(root, xml_file) + ".xml")),
+            )
         except ET.ParseError:
             continue
 
@@ -1180,12 +1168,14 @@ def build_blueprint_pool_lookup(
     for xml_file in pool_dir.rglob("*.xml"):
         try:
             root = ET.parse(xml_file).getroot()
+            if not _is_record_type(root, "BlueprintPoolRecord"):
+                continue
             pool_uuid = root.get("__ref", "")
             if not pool_uuid:
                 continue
             # Derive the stem without the bp_rewards_ / bp_ prefix so
             # _pool_rank_label can parse RankN/RankNtoM tokens from it.
-            raw_stem = xml_file.stem
+            raw_stem = _record_stem(root, xml_file)
             for pfx in ("bp_rewards_", "bp_"):
                 if raw_stem.startswith(pfx):
                     raw_stem = raw_stem[len(pfx) :]
@@ -1296,6 +1286,9 @@ def scan_contract_generators(
     blueprint_pools: dict[str, list[str]] | None = None,
     entity_names: dict[str, str] | None = None,
     pool_names: dict[str, str] | None = None,
+    *,
+    temporary_blueprints: dict | None = None,
+    vehicle_rentals: dict | None = None,
 ):
     """Scan contract generator XMLs for mission variants with different systems.
 
@@ -1501,6 +1494,59 @@ def scan_contract_generators(
                                     if title_key not in mission_bp_chance:
                                         mission_bp_chance[title_key] = contract_bp_chance
 
+                            if temporary_blueprints is not None:
+                                for modifier in contract.findall(
+                                    "./paramOverrides/modifierOverrides/MissionModifier_TemporaryBlueprint"
+                                ):
+                                    if modifier.get("enabled") != "1":
+                                        continue
+                                    pool_uuid = modifier.get("blueprintPool", "")
+                                    pool_items = blueprint_pools.get(pool_uuid, [])
+                                    if not pool_items:
+                                        logger.warning(
+                                            "Unresolved temporary blueprint pool for %s: %s", title_key, pool_uuid
+                                        )
+                                        continue
+                                    pool_label = _pool_rank_label(pool_names.get(pool_uuid, ""))
+                                    existing_items = (
+                                        temporary_blueprints.setdefault(title_key, {})
+                                        .setdefault(desc_key, {})
+                                        .setdefault(system_name, {})
+                                        .setdefault(pool_label, [])
+                                    )
+                                    for item in pool_items:
+                                        if item not in existing_items:
+                                            existing_items.append(item)
+
+                            if vehicle_rentals is not None:
+                                for rental in contract.findall(
+                                    "./contractResults/contractResults/ContractResult_VehicleRental"
+                                ):
+                                    success = rental.find("./missionResults/Bool")
+                                    if success is None or success.get("value") != "1":
+                                        continue
+                                    vehicle_ref = rental.get("vehicleEntityClass", "")
+                                    name = entity_names.get(vehicle_ref)
+                                    if not name:
+                                        logger.warning("Unresolved vehicle rental for %s: %s", title_key, vehicle_ref)
+                                        continue
+                                    duration = ""
+                                    try:
+                                        minutes = float(rental.get("durationMinutes", ""))
+                                        if math.isfinite(minutes) and minutes > 0:
+                                            hours = minutes / MINUTES_PER_HOUR
+                                            duration = f" ({hours:g} {'hour' if hours == 1 else 'hours'})"
+                                    except (ValueError, TypeError):
+                                        pass
+                                    rental_names = (
+                                        vehicle_rentals.setdefault(title_key, {})
+                                        .setdefault(desc_key, {})
+                                        .setdefault(system_name, [])
+                                    )
+                                    rental_name = name + duration
+                                    if rental_name not in rental_names:
+                                        rental_names.append(rental_name)
+
                             # Extract item rewards
                             if entity_names:
                                 item_names = []
@@ -1617,6 +1663,8 @@ def _resolve_resource_uuids(bp_dir: Path) -> set[str]:
     for xml_file in bp_dir.rglob("*.xml"):
         try:
             root = ET.parse(xml_file).getroot()
+            if not _is_record_type(root, "CraftingBlueprintRecord"):
+                continue
             for elem in root.iter():
                 if _poly_type(elem) == "CraftingCost_Resource":
                     r = elem.get("resource", "")
@@ -1657,7 +1705,10 @@ def _build_uuid_to_commodity(uuids: set[str], carryables_dir: Path) -> dict[str,
             matched_uuids = [u for u in uuids if u in content]
             if not matched_uuids:
                 continue
-            fname = xml_file.stem
+            root = ET.fromstring(content)
+            if not _is_entity_record(root):
+                continue
+            fname = _record_stem(root, xml_file)
             m = re.search(r"commodity_(?:metal|mineral|minerals|nonmetal|gas)_(\w+?)(?:_[a-d])?$", fname)
             if m:
                 commodity = _normalize_commodity_name(m.group(1))
@@ -1795,9 +1846,11 @@ def scan_crafting_blueprints(
     for xml_file in sorted(bp_dir.rglob("*.xml")):
         try:
             root = ET.parse(xml_file).getroot()
+            if not _is_record_type(root, "CraftingBlueprintRecord"):
+                continue
             rel = xml_file.relative_to(bp_dir)
             category = str(rel.parent).replace(os.sep, "/")
-            item_name = xml_file.stem.replace("bp_craft_", "")
+            item_name = _record_stem(root, xml_file).replace("bp_craft_", "")
             # Try to resolve display name from entity reference
             for elem in root.iter():
                 if _poly_type(elem) == "CraftingProcess_Creation":
@@ -2041,6 +2094,10 @@ def _loadout_summary(root: ET.Element) -> tuple[str, str]:
     return "  |  ".join(weapon_parts), "  |  ".join(core_parts)
 
 
+_FLIGHT_CONTROLLER_PREFIX = "controller_flight_"
+_FLIGHT_CONTROLLER_PORT = "hardpoint_controller_flight"
+
+
 def build_controller_lookup(controller_dir: Path) -> dict[str, ET.Element]:
     """Build lookup: ship_class_lower → flight controller XML root.
 
@@ -2052,10 +2109,17 @@ def build_controller_lookup(controller_dir: Path) -> dict[str, ET.Element]:
     if not controller_dir.exists():
         logger.warning(f"Controller dir not found: {controller_dir}")
         return lookup
-    for xml_file in controller_dir.glob("controller_flight_*.xml"):
-        ship_class = xml_file.stem[len("controller_flight_") :]
+    for xml_file in controller_dir.glob("*.xml"):
         try:
             root = ET.parse(xml_file).getroot()
+            if not _is_entity_record(root):
+                continue
+            controller_class = _record_class_name(root, xml_file).lower()
+            if not controller_class.startswith(_FLIGHT_CONTROLLER_PREFIX):
+                controller_class = _record_stem(root, xml_file).lower()
+            if not controller_class.startswith(_FLIGHT_CONTROLLER_PREFIX):
+                continue
+            ship_class = controller_class[len(_FLIGHT_CONTROLLER_PREFIX) :]
             lookup[ship_class.lower()] = root
         except ET.ParseError:
             pass
@@ -2079,8 +2143,9 @@ def build_armor_lookup(armor_dir: Path) -> dict[str, ET.Element]:
             root = ET.parse(xml_file).getroot()
         except ET.ParseError:
             continue
-        tag = root.tag
-        class_name = tag.split(".", 1)[1] if "." in tag else xml_file.stem
+        if not _is_entity_record(root):
+            continue
+        class_name = _record_class_name(root, xml_file)
         lookup[class_name.lower()] = root
     return lookup
 
@@ -2134,15 +2199,14 @@ def scan_spaceships(
     matched = missed = skipped = 0
 
     for xml_file in sorted(spaceships_dir.glob("*.xml")):
-        # Skip AI variants, templates, and unmanned variants
-        stem = xml_file.stem.lower()
-        if "_pu_ai_" in stem or "_ai_template" in stem or "_unmanned_" in stem:
-            skipped += 1
-            continue
-
         try:
             root = ET.parse(xml_file).getroot()
         except ET.ParseError:
+            continue
+
+        stem = _record_stem(root, xml_file).lower()
+        if not _is_entity_record(root) or "_pu_ai_" in stem or "_ai_template" in stem or "_unmanned_" in stem:
+            skipped += 1
             continue
 
         # Loc key from VehicleComponentParams.vehicleDescription
@@ -2162,9 +2226,17 @@ def scan_spaceships(
             continue
 
         # Match ship class to flight controller
-        root_tag = root.tag
-        ship_class = root_tag.split(".", 1)[1].lower() if "." in root_tag else stem
+        ship_class = _record_class_name(root, xml_file).lower()
         controller_root = controller_lookup.get(ship_class)
+        if controller_root is None:
+            for entry in root.iter("SItemPortLoadoutEntryParams"):
+                if entry.get("itemPortName", "").lower() != _FLIGHT_CONTROLLER_PORT:
+                    continue
+                controller_class = entry.get("entityClassName", "").lower()
+                if controller_class.startswith(_FLIGHT_CONTROLLER_PREFIX):
+                    controller_root = controller_lookup.get(controller_class[len(_FLIGHT_CONTROLLER_PREFIX) :])
+                    if controller_root is not None:
+                        break
 
         try:
             block = enhancements_ship_dataforge(root, controller_root, loc, armor_lookup)
@@ -2204,7 +2276,7 @@ def build_ammo_lookup(ammo_dir: Path) -> dict[str, ET.Element]:
                 lookup[ref] = root
             # Fallback: index by file stem if no __ref (helps with FPS ammo)
             else:
-                lookup[xml_file.stem] = root
+                lookup[_record_stem(root, xml_file)] = root
         except ET.ParseError:
             pass
     return lookup
@@ -2236,6 +2308,7 @@ def build_scitem_lookups(
     mag_lookup: dict[str, tuple[str, str]] = {}
     entity_names: dict[str, str] = {}
     entity_names_by_filename: dict[str, str] = {}
+    canonical_filename_names: dict[str, str] = {}
     entity_name_tags: dict[str, str] = {}
     loc = loc or {}
     if not scitem_dir.exists():
@@ -2247,8 +2320,10 @@ def build_scitem_lookups(
         except ET.ParseError:
             continue
 
+        if not _is_entity_record(root):
+            continue
         ref = root.get("__ref", "")
-        entity_name = root.tag.split(".")[-1] if "." in root.tag else xml_file.stem
+        entity_name = _record_class_name(root, xml_file)
         found_mag = False
         found_name = False
         found_desc = False
@@ -2279,7 +2354,12 @@ def build_scitem_lookups(
         if resolved_display_name is not None:
             if ref:
                 entity_names[ref] = resolved_display_name
-            entity_names_by_filename[xml_file.stem.lower()] = resolved_display_name
+            stem_key = _record_stem(root, xml_file).lower()
+            if xml_file.stem.lower() == stem_key:
+                canonical_filename_names[stem_key] = resolved_display_name
+            else:
+                entity_names_by_filename.setdefault(stem_key, resolved_display_name)
+            entity_names_by_filename[entity_name.lower()] = resolved_display_name
 
         # Component name-tag derivation. _component_name_tag returns None for
         # anything other than a ship component or mining head/laser, so
@@ -2292,6 +2372,7 @@ def build_scitem_lookups(
                 if tag:
                     entity_name_tags[ref] = tag
 
+    entity_names_by_filename.update(canonical_filename_names)
     return mag_lookup, entity_names, entity_names_by_filename, entity_name_tags
 
 
@@ -2304,6 +2385,8 @@ def collect_component_tag_fallbacks(scitem_dir: Path, loc: dict[str, str]) -> di
         try:
             root = ET.parse(xml_file).getroot()
         except ET.ParseError:
+            continue
+        if not _is_entity_record(root):
             continue
         desc_key = _loc_key(root)
         if desc_key and (desc_value := loc.get(desc_key)):
@@ -2490,10 +2573,12 @@ def main(
             f"DataForge cache not found at {forge_dir}\nRun 'Extract DataForge' in the app first (Enhancements tab)."
         )
 
+    dependency_key = _dataforge_cache_key(forge_dir, loc)
     tag_fallbacks = _cached_lookup(
         forge_dir,
         "component_tag_fallbacks",
         lambda: collect_component_tag_fallbacks(records / "entities" / "scitem", loc),
+        dependency_key=dependency_key,
     )
 
     # ── Estimate total phases for determinate progress ────────────────────────
@@ -2544,6 +2629,7 @@ def main(
             forge_dir,
             "scitem_lookups",
             lambda: build_scitem_lookups(records / "entities" / "scitem", loc),
+            dependency_key=dependency_key,
         )
 
     def _build_reputation():
@@ -2567,7 +2653,7 @@ def main(
                     continue
             return out
 
-        return _cached_lookup(forge_dir, "reputation", _builder)
+        return _cached_lookup(forge_dir, "reputation", _builder, dependency_key=dependency_key)
 
     lookup_jobs: dict[str, Callable] = {}
     if need_ammo:
@@ -2612,6 +2698,38 @@ def main(
             reputation_lookup = results["reputation"]
             logger.info(f"Loaded {len(reputation_lookup)} reputation reward definitions")
             _tick("Built reputation lookup")
+
+    if _want("mission_rewards"):
+        reward_entity_files = sorted((records / "entities" / "spaceships").rglob("*.xml"))
+        reward_entity_files.extend(sorted((records / "entities" / "groundvehicles").rglob("*.xml")))
+        reward_actor_files = sorted(records.glob("actor/actors/argo_atls*.xml"))
+        actor_parent = reward_actor_files[0].parent if reward_actor_files else None
+        if actor_parent is not None:
+            reward_entity_files.extend(sorted(actor_parent.glob("*.xml")))
+        for xml_file in reward_entity_files:
+            try:
+                root = ET.parse(xml_file).getroot()
+            except ET.ParseError:
+                continue
+            if not _is_entity_record(root):
+                continue
+            if xml_file.parent == actor_parent and not _record_stem(root, xml_file).lower().startswith("argo_atls"):
+                continue
+            ref = root.get("__ref", "")
+            if not ref or ref == NULL_UUID or ref in entity_names:
+                continue
+            vehicle = _find(root, "VehicleComponentParams")
+            localization = _find(root, "Localization")
+            name_ref = vehicle.get("vehicleName", "") if vehicle is not None else ""
+            if not name_ref and localization is not None:
+                name_ref = localization.get("Name", "")
+            if not name_ref:
+                localized_name = root.find("./localizedName")
+                if localized_name is not None:
+                    name_ref = localized_name.get("value", "")
+            if name_ref.startswith("@") and not _is_sentinel_loc_ref(name_ref):
+                if display_name := loc.get(name_ref.lstrip("@")):
+                    entity_names[ref] = display_name
 
     # ── Output-file generators (parallel wave) ────────────────────────────────
     # Each closure captures the lookups it needs and returns its output dict(s).
@@ -2929,17 +3047,22 @@ def main(
                 entity_names_by_filename=entity_names_by_filename,
                 entity_name_tags=entity_name_tags,
             ),
+            dependency_key=dependency_key,
         )
         _tick("Built blueprint pool lookup")
 
         # Contract generator missions (multiple variants per title key)
         contractgen_dir = records / "contracts" / "contractgenerator"
+        temporary_blueprints: dict = {}
+        vehicle_rentals: dict = {}
         contractgen_missions, mission_blueprints, mission_bp_chance, mission_items = scan_contract_generators(
             contractgen_dir,
             reputation_lookup,
             blueprint_pools,
             entity_names,
             pool_names=pool_names,
+            temporary_blueprints=temporary_blueprints,
+            vehicle_rentals=vehicle_rentals,
         )
         logger.info(
             f"Processed {len(contractgen_missions)} contract generator mission variants, {len(mission_blueprints)} with blueprints, {len(mission_items)} with items"
@@ -3163,6 +3286,26 @@ def main(
                 if title_key in mission_items:
                     item_list = "\\n".join(f"- {name}" for name in mission_items[title_key])
                     sections.append(f"<EM3>ITEM REWARDS</EM3>\\n{item_list}")
+
+                temporary_pools = temporary_blueprints.get(title_key, {}).get(desc_key, {})
+                if temporary_pools:
+                    temporary_parts = []
+                    for system_name, by_label in sorted(temporary_pools.items()):
+                        for pool_label, names in sorted(by_label.items()):
+                            header = f"{system_name}, {pool_label}" if pool_label else system_name
+                            temporary_parts.append(
+                                f"<EM4>[{header}]</EM4>\\n" + "\\n".join(f"- {name}" for name in names)
+                            )
+                    sections.append("<EM3>TEMPORARY BLUEPRINT ACCESS</EM3>\\n" + "\\n\\n".join(temporary_parts))
+
+                rentals_by_system = vehicle_rentals.get(title_key, {}).get(desc_key, {})
+                if rentals_by_system:
+                    rental_parts = []
+                    for system_name, names in sorted(rentals_by_system.items()):
+                        rental_parts.append(
+                            f"<EM4>[{system_name}]</EM4>\\n" + "\\n".join(f"- {name}" for name in names)
+                        )
+                    sections.append("<EM3>VEHICLE RENTAL REWARDS</EM3>\\n" + "\\n\\n".join(rental_parts))
 
                 details_block = "\\n".join(details_lines)
                 if details_block:

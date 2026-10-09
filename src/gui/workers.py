@@ -7,17 +7,22 @@ import logging
 import sys
 from pathlib import Path
 
-from PyQt6.QtCore import QModelIndex, QThread, pyqtSignal
+from PyQt6.QtCore import QModelIndex, Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QColor, QMouseEvent
 from PyQt6.QtWidgets import QLabel, QProgressBar, QProgressDialog, QStyledItemDelegate, QStyleOptionViewItem, QWidget
 
+from src.utils.dataforge_contract import ENHANCEMENTS_GENERATION_CONTRACT_VERSION
 from src.utils.dataforge_diff import dirty_categories
+from src.utils.file_utils import atomic_write_text
 from src.utils.resource import _resolve_patches_dir
 from src.utils.settings import AppSettings
 
 logger = logging.getLogger(__name__)
 
 _BASE_INI_GENERATION_MARKER = ".enhancements_base_ini.json"
+_PROGRESS_DIALOG_WIDTH = 520
+_PROGRESS_DIALOG_SCREEN_MARGIN = 40
+_PROGRESS_MESSAGE_LIMIT = 300
 
 
 def _base_ini_identity(path: Path) -> dict[str, int | str]:
@@ -26,17 +31,48 @@ def _base_ini_identity(path: Path) -> dict[str, int | str]:
     return {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns, "sha256": digest}
 
 
-def _base_ini_needs_regeneration(base_ini: Path, cache_dir: Path) -> bool:
+def _base_ini_needs_regeneration(base_ini: Path, cache_dir: Path, categories: set[str] | None = None) -> bool:
     marker = cache_dir / _BASE_INI_GENERATION_MARKER
     try:
-        return json.loads(marker.read_text(encoding="utf-8")) != _base_ini_identity(base_ini)
+        recorded = json.loads(marker.read_text(encoding="utf-8"))
+        selected = AppSettings.get_enabled_enhancement_categories() if categories is None else categories
+        return (
+            not isinstance(recorded, dict)
+            or recorded.get("base_ini") != _base_ini_identity(base_ini)
+            or recorded.get("generation_contract_version") != ENHANCEMENTS_GENERATION_CONTRACT_VERSION
+            or not selected.issubset(recorded.get("categories", []))
+        )
     except (OSError, json.JSONDecodeError):
         return True
 
 
-def _record_generated_base_ini(base_ini: Path, cache_dir: Path) -> None:
-    (cache_dir / _BASE_INI_GENERATION_MARKER).write_text(
-        json.dumps(_base_ini_identity(base_ini), sort_keys=True), encoding="utf-8"
+def _record_generated_base_ini(
+    base_ini: Path, cache_dir: Path, categories: set[str] | None = None, *, reset_categories: bool = False
+) -> None:
+    marker = cache_dir / _BASE_INI_GENERATION_MARKER
+    identity = _base_ini_identity(base_ini)
+    generated = set(AppSettings.get_enabled_enhancement_categories() if categories is None else categories)
+    try:
+        recorded = json.loads(marker.read_text(encoding="utf-8"))
+        if (
+            not reset_categories
+            and isinstance(recorded, dict)
+            and recorded.get("base_ini") == identity
+            and recorded.get("generation_contract_version") == ENHANCEMENTS_GENERATION_CONTRACT_VERSION
+        ):
+            generated.update(recorded.get("categories", []))
+    except (OSError, json.JSONDecodeError):
+        pass
+    atomic_write_text(
+        marker,
+        json.dumps(
+            {
+                "base_ini": identity,
+                "generation_contract_version": ENHANCEMENTS_GENERATION_CONTRACT_VERSION,
+                "categories": sorted(generated),
+            },
+            sort_keys=True,
+        ),
     )
 
 
@@ -55,13 +91,29 @@ class AnimatedProgressDialog(QProgressDialog):
         super().__init__(message, None, 0, 0, parent)
         self.setWindowTitle(title)
         self.setModal(True)
-        self.setMinimumWidth(400)
+        screen = self.screen()
+        width = _PROGRESS_DIALOG_WIDTH
+        if screen is not None:
+            width = min(width, screen.availableGeometry().width() - _PROGRESS_DIALOG_SCREEN_MARGIN)
+        self.setFixedWidth(width)
+        self._message_label = QLabel(self)
+        self._message_label.setStyleSheet("font-size: 16px;")
+        self._message_label.setWordWrap(True)
+        self._message_label.setTextFormat(Qt.TextFormat.PlainText)
+        self._message_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.setLabel(self._message_label)
+        self.setLabelText(message)
         self._bar = self.findChild(QProgressBar)
         if self._bar is not None:
             # Start indeterminate — bar text hidden until set_progress flips
             # to determinate and a real percentage exists to display.
             self._bar.setTextVisible(False)
         self.show()
+
+    def setLabelText(self, message: str) -> None:
+        display = message if len(message) <= _PROGRESS_MESSAGE_LIMIT else message[: _PROGRESS_MESSAGE_LIMIT - 3] + "..."
+        self._message_label.setToolTip(message if display != message else "")
+        super().setLabelText(display)
 
     def set_progress(self, completed: int, total: int, message: str = "") -> None:
         """Drive the bar from a ProgressSink. total=0 ⇒ indeterminate.
@@ -244,6 +296,10 @@ class EnhancementsGeneratorWorker(QThread):
         self.force_full = force_full
 
     def run(self) -> None:
+        if self.categories == set():
+            self.finished.emit(True)
+            return
+
         from src.utils.dataforge_diff import update_manifest
         from src.utils.dataforge_patcher import apply_patches
         from src.utils.pak_extractor import patch_set_fingerprint, rebuild_patched_dataforge_cache
@@ -271,17 +327,9 @@ class EnhancementsGeneratorWorker(QThread):
                     for err in report.errors:
                         logger.warning(f"  patch error: {err}")
 
-            def _finalize_patched_cache(cache_dir: Path) -> None:
-                _apply_patches(cache_dir)
-                self.progress.emit("Snapshotting patched DataForge cache…")
-                update_manifest(
-                    cache_dir / "raw" / "libs",
-                    progress_callback=lambda completed, total, message: self.progress_pct.emit(
-                        completed, total, message
-                    ),
-                )
-
-            patched_rebuilt = rebuild_patched_dataforge_cache(forge_dir, patch_fingerprint, _finalize_patched_cache)
+            patched_rebuilt = rebuild_patched_dataforge_cache(
+                forge_dir, patch_fingerprint, _apply_patches, self.progress.emit
+            )
             if not patched_rebuilt:
                 _apply_patches(forge_dir)
             # ── Diff-cache check ──────────────────────────────────────────────
@@ -290,7 +338,8 @@ class EnhancementsGeneratorWorker(QThread):
             # set() → nothing changed, skip entirely.
             # {...} → only re-run the categories whose source XMLs changed.
             libs_dir = forge_dir / "raw" / "libs"
-            base_ini_changed = _base_ini_needs_regeneration(base_ini, cache_dir)
+            selected = set(AppSettings.ENHANCEMENTS_FILES) if self.categories is None else self.categories
+            base_ini_changed = _base_ini_needs_regeneration(base_ini, cache_dir, selected)
             diff = None if self.force_full or patched_rebuilt or base_ini_changed else dirty_categories(libs_dir)
             # If any enabled enhancement files are missing, force a full
             # regeneration — even if the manifest reports some or all categories
@@ -315,10 +364,14 @@ class EnhancementsGeneratorWorker(QThread):
                     translated: set[str] = set()
                     for diff_key in diff:
                         translated.update(AppSettings.DIFF_CATEGORY_TO_GENERATOR_KEYS.get(diff_key, [diff_key]))
-                    self.categories = translated & (self.categories or set(AppSettings.ENHANCEMENTS_FILES))
+                    self.categories = translated & selected
                 else:
                     self.categories = set()  # nothing changed — skip all
             # ─────────────────────────────────────────────────────────────────
+
+            if self.categories == set():
+                self.finished.emit(True)
+                return
 
             self.progress.emit("Loading enhancements generator...")
 
@@ -333,7 +386,7 @@ class EnhancementsGeneratorWorker(QThread):
             sys.modules[module_name] = mod
             spec.loader.exec_module(mod)
 
-            self.progress.emit("Generating enhancements (may take a few minutes on first run)...")
+            self.progress.emit("Generating enhancements from cached DataForge records…")
             logger.info("Enhancements generation worker: calling mod.main()")
 
             cat_desc = ", ".join(sorted(self.categories)) if self.categories else "all"
@@ -352,12 +405,11 @@ class EnhancementsGeneratorWorker(QThread):
                 progress_callback=_on_progress,
                 patches_dir=_resolve_patches_dir(),
             )
-            if set(self.categories or ()) == AppSettings.get_enabled_enhancement_categories():
-                _record_generated_base_ini(base_ini, cache_dir)
-            if (
-                not self.force_full
-                and not patched_rebuilt
-                and (diff is None or (diff and not (translated - self.categories)))
+            generated = set(AppSettings.ENHANCEMENTS_FILES) if self.categories is None else self.categories
+            if generated:
+                _record_generated_base_ini(base_ini, cache_dir, generated, reset_categories=diff is None)
+            if (diff is None and AppSettings.get_enabled_enhancement_categories().issubset(generated)) or (
+                diff and not (translated - generated)
             ):
                 self.progress.emit("Snapshotting patched DataForge cache…")
                 update_manifest(
@@ -434,7 +486,6 @@ class DataForgeExtractWorker(QThread):
     def run(self) -> None:
         import threading as _threading
 
-        from src.utils.dataforge_diff import update_manifest
         from src.utils.dataforge_patcher import apply_patches
         from src.utils.pak_extractor import extract_dataforge, patch_set_fingerprint
 
@@ -449,13 +500,6 @@ class DataForgeExtractWorker(QThread):
                 if report.errors:
                     for err in report.errors:
                         logger.warning(f"  patch error: {err}")
-                self.progress.emit("Snapshotting patched DataForge cache…")
-                update_manifest(
-                    staging_dir / "raw" / "libs",
-                    progress_callback=lambda completed, total, message: self.progress_pct.emit(
-                        completed, total, message
-                    ),
-                )
 
             extract_dataforge(
                 self._p4k,

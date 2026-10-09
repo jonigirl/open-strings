@@ -20,15 +20,25 @@ only (GPL-3.0-only). See `LICENSE` for the full terms.
 
 ### unp4k / unforge
 
-This application downloads `unp4k.exe`, `unforge.exe`, and their supporting
-libraries from [unp4k](https://github.com/dolkensp/unp4k) by Peter Dolkens
-and contributors on first use, and caches them locally under
-`%APPDATA%\Open Strings\tools\`. These tools are not distributed with this
-application.
+Open Strings downloads upstream `unp4k.exe` and uses a patched `unforge.cli.exe`
+based on [unp4k](https://github.com/dolkensp/unp4k) by Peter Dolkens and contributors.
+The patched unforge ZIP is included in release installers and supplied as a separate
+release asset. Tools are installed into `%APPDATA%\Open Strings\tools\<version>\`.
+
+The patched package retains upstream's MIT notice in `LICENSE.txt`. The
+Open Strings-specific modifications are supplied under GPL-3.0-only, with the
+full license in `OPENSTRINGS-LICENSE.txt`. The package also includes this notice
+and build provenance identifying the pinned upstream revision and patch hashes.
+
+Corresponding modifications and build instructions are available in the
+[Open Strings source](https://github.com/jonigirl/open-strings), under
+`scripts/build/unforge/` and `scripts/build/build_unforge.py`. For a release, use
+its matching version tag. The upstream source revision is recorded in the
+package's `build-info.json` and can be obtained from the upstream repository.
 
 Copyright (C) Peter Dolkens and contributors.
 
-Licensed under the MIT License:
+Upstream components are licensed under the MIT License:
 
 > Permission is hereby granted, free of charge, to any person obtaining a copy
 > of this software and associated documentation files (the "Software"), to deal

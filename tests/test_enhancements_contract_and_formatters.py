@@ -32,6 +32,57 @@ def test_enhancement_output_map_matches_app_constants(gen_module):
     assert gen_module.ENHANCEMENT_OUTPUT_FILES == ENHANCEMENTS_FILES
 
 
+@pytest.mark.parametrize("class_names", [("Example", "Variant"), ("Primary", "Example")])
+def test_scitem_sidecars_preserve_entities_without_ancillary_pollution(gen_module, tmp_path, class_names):
+    canonical = "libs/foundry/records/entities/scitem/example.xml"
+    for filename, name, ref, display, record_type in [
+        ("example.xml", class_names[0], "primary", "Primary", "EntityClassDefinition"),
+        ("uuid.xml", class_names[1], "variant", "Variant", "SEntityClassDefinition"),
+        ("ancillary.xml", "Example", "ancillary", "Unwanted", "UseChannelArchetype"),
+    ]:
+        (tmp_path / filename).write_text(
+            f'<EntityClassDefinition.{name} __path="{canonical}" __ref="{ref}" __type="{record_type}">'
+            f'<Localization Name="@{display}"/>'
+            '<SAmmoContainerComponentParams ammoParamsRecord="ammo" maxAmmoCount="5"/>'
+            f"</EntityClassDefinition.{name}>",
+            encoding="utf-8",
+        )
+    (tmp_path / "empty.xml").write_text(
+        '<EntityClassDefinition.Empty __type="EntityClassDefinition" __ref="empty"/>', encoding="utf-8"
+    )
+    magazines, names, filenames, tags = gen_module.build_scitem_lookups(tmp_path)
+    assert names == {"primary": "Primary", "variant": "Variant"}
+    assert filenames == {class_names[0].lower(): "Primary", class_names[1].lower(): "Variant", "example": "Primary"}
+    assert magazines == {name: ("ammo", "5") for name in class_names}
+    assert tags == {}
+
+
+def test_controller_sidecar_uses_original_record_name(gen_module, tmp_path):
+    (tmp_path / "uuid.xml").write_text(
+        '<EntityClassDefinition.Controller_Flight_Variant __type="EntityClassDefinition" '
+        '__path="libs/foundry/records/entities/scitem/ships/controller/controller_flight_example.xml">'
+        '<IFCSParams scmSpeed="330"/></EntityClassDefinition.Controller_Flight_Variant>',
+        encoding="utf-8",
+    )
+    assert set(gen_module.build_controller_lookup(tmp_path)) == {"variant"}
+
+
+def test_carryable_sidecar_resolves_resources_from_canonical_path(gen_module, tmp_path):
+    (tmp_path / "uuid.xml").write_text(
+        '<EntityClassDefinition.Example __type="EntityClassDefinition" '
+        '__path="libs/foundry/records/entities/scitem/carryables/commodity_metal_iron.xml">'
+        '<Resource resource="material"/></EntityClassDefinition.Example>',
+        encoding="utf-8",
+    )
+    (tmp_path / "ancillary.xml").write_text(
+        '<ResourceType.Example __type="ResourceType" '
+        '__path="libs/foundry/records/entities/scitem/carryables/commodity_metal_gold.xml">'
+        '<Resource resource="material"/></ResourceType.Example>',
+        encoding="utf-8",
+    )
+    assert gen_module._build_uuid_to_commodity({"material"}, tmp_path) == {"material": "iron"}
+
+
 def test_enhancement_output_files_have_expected_suffix(gen_module):
     for file_name in gen_module.ENHANCEMENT_OUTPUT_FILES.values():
         assert file_name.endswith("_enhancements.ini")
@@ -468,6 +519,100 @@ def test_ship_dataforge_formatter_outputs_flight_and_insurance(gen_module):
     assert "Role:" in out
     assert "Armor HP:" in out
     assert "Insurance:" in out
+
+
+@pytest.mark.parametrize("primary", [False, True])
+def test_spaceship_controller_loadout_fallback_preserves_primary(gen_module, tmp_path, primary):
+    ships = tmp_path / "spaceships"
+    controllers = tmp_path / "controllers"
+    ships.mkdir()
+    controllers.mkdir()
+    (ships / "variant.xml").write_text(
+        "<EntityClassDefinition.Example_Variant>"
+        '<VehicleComponentParams vehicleDescription="@ship_desc"/>'
+        '<SItemPortLoadoutEntryParams itemPortName="hardpoint_controller_flight" '
+        'entityClassName="Controller_Flight_Example_Base"/>'
+        "</EntityClassDefinition.Example_Variant>",
+        encoding="utf-8",
+    )
+    (controllers / "controller_flight_example_base.xml").write_text(
+        '<Controller><IFCSParams scmSpeed="220"/></Controller>',
+        encoding="utf-8",
+    )
+    if primary:
+        (controllers / "controller_flight_example_variant.xml").write_text(
+            '<Controller><IFCSParams scmSpeed="330"/></Controller>',
+            encoding="utf-8",
+        )
+    lookup = gen_module.build_controller_lookup(controllers)
+    output = gen_module.scan_spaceships(ships, lookup, {"ship_desc": "Example ship"})
+    assert "SCM:" in output["ship_desc"]
+    assert ("330" if primary else "220") in output["ship_desc"]
+    if primary:
+        assert "220" not in output["ship_desc"]
+
+
+@pytest.mark.parametrize(
+    "entity_path",
+    ["entities/spaceships/example.xml", "entities/groundvehicles/example.xml", "actor/actors/argo_atls_example.xml"],
+)
+@pytest.mark.parametrize("name_source", ["vehicle", "localization", "localized_name", "scitem", "missing", "sentinel"])
+@pytest.mark.parametrize("export_mode", ["legacy", "sidecar", "ancillary"])
+def test_mission_rewards_resolve_retained_spaceship_names(gen_module, tmp_path, name_source, entity_path, export_mode):
+    forge = tmp_path / "forge"
+    records = forge / "raw/libs/foundry/records"
+    entity = records / entity_path
+    contracts = records / "contracts/contractgenerator"
+    scitem = records / "entities/scitem"
+    for folder in (entity.parent, contracts, scitem):
+        folder.mkdir(parents=True)
+    pointer = "@ship_name" if name_source != "sentinel" else "@LOC_EMPTY"
+    name_element = (
+        f'<Localization Name="{pointer}"/>'
+        if name_source == "localization"
+        else f'<VehicleComponentParams vehicleName="{pointer}"/>'
+    )
+    if name_source == "localized_name":
+        name_element = f'<localizedName value="{pointer}"/>'
+    metadata = ""
+    if export_mode != "legacy":
+        metadata = f' __type="{"EntityClassDefinition" if export_mode == "sidecar" else "UseChannelArchetype"}" __path="libs/foundry/records/{entity_path}"'
+        if entity_path.startswith("actor/"):
+            entity.write_text('<Example __type="EntityClassDefinition"/>', encoding="utf-8")
+        entity = entity.with_name("uuid.xml")
+    entity.write_text(
+        f'<Example __ref="ship-ref"{metadata}>{name_element}</Example>',
+        encoding="utf-8",
+    )
+    if name_source == "scitem":
+        (scitem / "example.xml").write_text(
+            '<Entity __ref="ship-ref"><Localization Name="@scitem_name"/></Entity>',
+            encoding="utf-8",
+        )
+    (contracts / "example.xml").write_text(
+        '<ContractGenerator><ContractGeneratorHandler_List debugName="example_Stanton">'
+        '<Contract debugName="example_Stanton"><ContractStringParam param="Title" value="@mission_title"/>'
+        '<ContractStringParam param="Description" value="@mission_desc"/>'
+        '<ContractResult_Item entityClass="ship-ref"/>'
+        "</Contract></ContractGeneratorHandler_List></ContractGenerator>",
+        encoding="utf-8",
+    )
+    base = tmp_path / "base.ini"
+    base.write_text(
+        "mission_title=Example mission\nmission_desc=Example description\nscitem_name=Primary item\nLOC_EMPTY=Placeholder\n"
+        + ("" if name_source == "missing" else "ship_name=Example ship\n"),
+        encoding="utf-8",
+    )
+    gen_module.main(base, forge, categories={"mission_rewards"}, max_workers=1)
+    output = gen_module.parse_ini(tmp_path / "mission_rewards_enhancements.ini")
+    description = output.get("mission_desc", "")
+    if name_source in {"missing", "sentinel"} or (export_mode == "ancillary" and name_source != "scitem"):
+        assert "ITEM REWARDS" not in description
+    else:
+        assert "ITEM REWARDS" in description
+        assert ("Primary item" if name_source == "scitem" else "Example ship") in description
+        if name_source == "scitem":
+            assert "Example ship" not in description
 
 
 def test_cooler_formatter_outputs_cooling_and_power(gen_module):

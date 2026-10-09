@@ -96,6 +96,29 @@ uv run pytest tests/ --tb=short
 
 ## Manual Testing Workflow
 
+### Local 1.5.2 Build Smoke Test
+
+1. Launch `dist/OpenStrings/OpenStrings.exe` or install
+   `dist/OpenStrings-1.5.2-Setup.exe`; confirm version 1.5.2 and a valid digital signature.
+2. Open the Log tab and pop it out before starting generation. Select PTU in Config,
+   confirm the installed game path, and run Generate Enhancements. The first run
+   with the new tools rebuilds the cache; allow several minutes for export and
+   integrity validation. Verify progress continues and the log remains visible.
+3. Confirm successful integrity validation and generation, then return the log to
+   its tab. Check that earlier entries remain and appear only once.
+4. Exercise Category, Favourite, and Status column dropdowns and each text-match
+   mode. Combine filters, sort a header, resize columns, and clear all filters.
+5. Check a ship description, temporary blueprint mission access, and a vehicle
+   rental description. Temporary access must not be labelled as permanent blueprint
+   ownership; rentals must include their duration.
+6. Disable and re-enable an enhancement category, then regenerate. Confirm current
+   output returns, saved overrides remain intact, and a clean subsequent generation
+   reports that enhancements are already up to date.
+
+Repeat the generation checks on LIVE separately. Each channel has its own cache
+and requires its own first-run rebuild. Do not apply to the game during initial
+smoke testing unless you also intend to test backup and restore behavior.
+
 ### 1. First Run Test (ensure no crashes on startup)
 
 ```bash
@@ -107,7 +130,7 @@ uv run python src/main.py
 ### 2. Core Features Test
 
 - Load base file
-- Verify ~80,000 entries in table
+- Verify the table loads the installed game's localization entries (counts vary by patch)
 - Filter by category (Ships, Gear, Missions)
 - Search for key (e.g., "shield")
 - Edit an entry
@@ -120,8 +143,9 @@ uv run python src/main.py
 ### 3. Enhancement Generation Test
 
 1. Set game path in Config tab
-2. Click "Extract DataForge from P4K" in the Enhancements tab
-3. Wait for extraction to complete (~30 seconds - 2 minutes depending on system)
+2. Click **Generate Enhancements** in the Enhancements tab
+3. Allow 30 minutes or longer for initial extraction; monitor exporter progress,
+   export integrity validation, and cache health checking as separate phases.
 4. Verify enhancement INI files in `Documents\Open Strings\<channel>\cache\`:
    - `ships_desc_enhancements.ini`
    - `components_desc_enhancements.ini`
@@ -130,24 +154,23 @@ uv run python src/main.py
    - `mission_rewards_enhancements.ini`
 5. Search for `vehicle_Desc` and verify entries show stats (e.g., "Max Speed: 210 m/s")
 
-**Time**: ~5-10 minutes
+**Time**: First extraction can take tens of minutes; generation from a current cache is shorter.
 
-### 4. Multi-Source & Merge Test
+### 4. Layered Merge And Persistence Test
 
-1. Config tab: Verify all sources are configured (Global, Contracts, Ships, Commodities, Gear)
-2. Drag a source to reorder hierarchy (e.g., move Contracts above Global)
-3. Click "Save Configuration & Merge"
-4. Verify table updates with new merge order
+1. Load base localization and generate the enabled enhancement categories.
+2. Pick an enhanced row and enter an example customization in **Custom Value**.
+3. Confirm **Default Value** remains stock and **Current Value** shows the generated layer.
+4. Restart the app and confirm the saved customization remains.
 
 **Time**: ~5 minutes
 
 ### 5. Error Handling Test
 
-1. Set a source URL to invalid path (e.g., `https://invalid.url/file.ini`)
-2. Click "Save Configuration & Merge"
-3. Verify error dialog appears with helpful message
-4. Click "Skip source"
-5. Verify merge continues with remaining sources
+1. Test against an invalid game-installation path in an isolated test configuration.
+2. Request extraction and verify a readable failure appears in the log/status display.
+3. Confirm the failure does not activate a partial extraction or overwrite existing edits.
+4. Return to a valid installation and verify a retry can succeed.
 
 **Time**: ~5 minutes
 
@@ -169,11 +192,11 @@ Coverage is measured automatically on every test run. GUI modules have Qt-based 
 
 ### Current Coverage
 
-| Area                       | Current expectation         |
-| -------------------------- | --------------------------- |
-| Full suite                 | `uv run pytest` passes      |
-| Coverage floor             | 83% (`--cov-fail-under=83`) |
-| Current development result | 1,000+ tests, 85% coverage  |
+| Area                       | Current expectation          |
+| -------------------------- | ---------------------------- |
+| Full suite                 | `uv run pytest` passes       |
+| Coverage floor             | 83% (`--cov-fail-under=83`)  |
+| Current development result | 1,244 tests, 87.23% coverage |
 
 The exact percentage naturally changes as code and tests evolve; rely on the full
 suite result rather than treating the development snapshot as a release requirement.

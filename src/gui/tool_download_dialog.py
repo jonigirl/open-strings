@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from src.utils.tools_manager import download_tools, get_tools_dir
+from src.utils.tools_manager import _UNFORGE_ZIP_URL, TOOLS_VERSION, download_tools, get_tools_dir
 
 logger = logging.getLogger(__name__)
 
@@ -71,9 +71,9 @@ class ToolDownloadDialog(QDialog):
         layout.setContentsMargins(18, 16, 18, 14)
 
         self._info = QLabel(
-            "Open Strings needs to download <b>unp4k</b> and <b>unforge</b> (~130 MB)\n"
-            "to extract Star Citizen data files.\n"
-            "This is a one-time download and will not happen again."
+            "Open Strings needs <b>unp4k</b> and the patched <b>unforge</b>\n"
+            "to extract Star Citizen data files. Missing tools are installed from\n"
+            "a verified bundled package when available, or downloaded and cached."
         )
         self._info.setWordWrap(True)
         layout.addWidget(self._info)
@@ -119,9 +119,10 @@ class ToolDownloadDialog(QDialog):
             self,
             "Download Failed",
             f"Could not download tools:\n\n{message}\n\n"
-            "This is usually caused by a network issue, firewall, or antivirus\n"
-            "blocking the download. Check your internet connection and try again.\n\n"
-            "Alternatively, download unp4k and unforge manually from:\n"
-            "https://github.com/dolkensp/unp4k/releases\n\n"
-            f"Place unp4k.exe and unforge.cli.exe (and their supporting files) in:\n{tools_dir}",
+            "HTTP 404 means the requested release asset is unavailable.\n"
+            "It does not necessarily indicate a firewall or antivirus problem.\n\n"
+            f"This build requires patched tool version {TOOLS_VERSION}.\n"
+            "The standard upstream unforge is not a compatible replacement.\n\n"
+            f"Required patched package:\n{_UNFORGE_ZIP_URL}\n\n"
+            f"Tool cache:\n{tools_dir}",
         )

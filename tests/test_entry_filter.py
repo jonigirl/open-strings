@@ -74,6 +74,76 @@ def test_column_filter_by_key():
     assert result == [1]
 
 
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [("contains", [0, 1, 2]), ("exact", [0]), ("starts_with", [0, 1]), ("excludes", [3])],
+)
+def test_column_match_modes_are_case_insensitive(mode, expected):
+    entries = [_e("Alpha"), _e("alphabet"), _e("prefix_ALPHA"), _e("beta")]
+    result = filter_entry_indices(
+        entries,
+        {},
+        ["", "ALPHA"],
+        "All",
+        "All",
+        False,
+        False,
+        "★",
+        column_filter_modes=["contains", mode],
+    )
+    assert result == expected
+
+
+def test_column_dropdowns_combine_with_text_modes():
+    entries = [
+        _e("alpha", category="Ships", custom_value="★ custom", status="Modified"),
+        _e("alphabet", category="Ships", custom_value="custom", status="Modified"),
+        _e("alpha", category="Gear", custom_value="★ custom", status="Modified"),
+    ]
+    result = filter_entry_indices(
+        entries,
+        {},
+        ["Ships", "alpha", "", "", "★", "", "Modified"],
+        "All",
+        "All",
+        False,
+        False,
+        "★",
+        column_filter_modes=["exact", "starts_with", "contains", "contains", "exact", "contains", "exact"],
+    )
+    assert result == [0]
+
+
+def test_not_favourite_column_filter_matches_displayed_star():
+    entries = [_e("ship", custom_value="★ custom"), _e("plain"), _e("gear", category="Gear", custom_value="★ custom")]
+    result = filter_entry_indices(
+        entries,
+        {},
+        ["", "", "", "", "★"],
+        "All",
+        "All",
+        False,
+        False,
+        "★",
+        column_filter_modes=["contains"] * 4 + ["excludes"],
+    )
+    assert result == [1, 2]
+
+
+def test_empty_excludes_filter_does_not_hide_rows():
+    assert filter_entry_indices(
+        [_e()],
+        {},
+        _no_filters(),
+        "All",
+        "All",
+        False,
+        False,
+        "★",
+        column_filter_modes=["excludes"] * 7,
+    ) == [0]
+
+
 def test_column_filter_by_status_text():
     entries = [_e("k1", status="Unmodified"), _e("k2", status="New")]
     col_filters = ["", "", "", "", "", "", "new"]

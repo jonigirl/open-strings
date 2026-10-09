@@ -8,7 +8,15 @@ On launch, Open Strings reloads any customizations from your previous session an
 
 Open the **Config** tab and click **Extract from Data.p4k**. This unpacks stock `global.ini` plus the DataForge entity XMLs used by the enhancement generator — ships, components, weapons, missions, blueprints, etc.
 
-> **First extraction only:** Open Strings needs two small extraction tools (unp4k and unforge, ~130 MB total) which are downloaded automatically from the upstream GitHub release the first time you extract. The download is a one-time step; the tools are cached locally and reused for all future extractions.
+> **Extraction tools:** Open Strings downloads upstream unp4k and a pinned patched
+> unforge package when the required tool version is not cached. The patched package
+> comes from the app's bundled ZIP when available, otherwise from the Open Strings
+> release, and its SHA-256 checksum is verified before
+> extraction. No separate .NET installation is required.
+
+Updating to 1.5.2 requires one DataForge rebuild for each channel you use. The older
+cache does not contain all newly retained record bodies; your saved overrides are
+not removed. A new extraction is validated before it replaces the previous cache.
 
 When extraction finishes, the extracted `base.ini` is loaded into the table automatically — merged with any enhancement files and your saved `user.ini` overrides.
 
@@ -53,9 +61,12 @@ Use the **Category** filter to focus on one domain:
 ## 5. Search & Filter
 
 - Use the **search box** to find strings by key or text content.
-- Combine with **Category** and **Status** (Modified / Unmodified / New) filters.
+- Combine with **Category** and **Status** (Enhanced / Modified / Unmodified / New) filters.
 - Check **Hide Unmodified** to focus on your own edits only.
-- The **per-column filter boxes** under each header narrow further within the table.
+- **Category**, **Favourite**, and **Status** column dropdowns select exact values.
+- Text columns have **Contains**, **Exact**, **Starts with**, and **Excludes** match
+  modes. Matching is case-insensitive; column conditions are combined.
+- **Clear Filters** resets both the column inputs and their match modes.
 - Click any column header to sort by that column. Click the **★** header to sort favorites to the top.
 
 ## 6. Ship Favorites
@@ -90,6 +101,12 @@ When Star Citizen updates, your edits are preserved in `<data folder>\<channel>\
 - Enable or disable each enhancement category independently.
 - Configure the ship favorites prefix character.
 - Click **Generate Enhancements** to extract DataForge data from `Data.p4k` and rebuild the enhancement INI files. Declarative patches under `patches/` are re-applied idempotently on every regen so known CIG data bugs stay fixed without waiting for a game patch.
+- Mission descriptions distinguish temporary blueprint access from permanent
+  blueprint rewards, and show successful vehicle rentals with their duration.
+- DataForge export output appears live in the Log tab. An export may run for up
+  to two hours overall; it stops after 30 minutes without output. Timeout messages
+  distinguish these limits and include the latest diagnostics. No incomplete
+  extraction is activated.
 
 ## Config Tab
 
@@ -103,6 +120,9 @@ When Star Citizen updates, your edits are preserved in `<data folder>\<channel>\
 
 - Real-time application log.
 - Filter by log level, auto-scroll to latest entries, and **Export** the log for troubleshooting or bug reports.
+- Click **Pop Out** to monitor the same log in a separate non-modal window while
+  using the app. **Return to Tab**, or closing the window, restores the viewer
+  without discarding entries.
 
 ## Themes
 
@@ -129,6 +149,12 @@ Click the **Tutorial** button on the toolbar at any time to replay the guided to
 - **Enhancements empty or missing items** — Run **Generate Enhancements** from the Enhancements tab; it needs a DataForge cache (click **Extract from Data.p4k** first if you haven't).
 - **Apply to Game fails** — Confirm the Star Citizen install path in the **Config Tab** and that the game isn't running.
 - **Stale data after game update** — Re-run **Extract from Data.p4k**, then regenerate enhancements.
+- **Export integrity check failed** — The new extraction was not activated. Keep
+  the previous cache and inspect the log; do not treat an incomplete export as
+  current data.
+- **Unresolved game references** — Some targets are absent from the game database,
+  and cyclic structures cannot be represented as an infinitely expanded XML tree.
+  Complete record export is not a promise that every reference resolves.
 
 ## Known Issues
 

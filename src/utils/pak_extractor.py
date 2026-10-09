@@ -1,9 +1,14 @@
 """Extracts files from Star Citizen's Data.p4k using unp4k.exe."""
 
+import codecs
 import hashlib
+import io
 import json
 import logging
+import os
+import queue
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -13,9 +18,20 @@ import uuid
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
-from src.utils.dataforge_contract import DATAFORGE_KEEP_SUBPATHS
+from src.utils.app_constants import (
+    DATAFORGE_EXPORT_IDLE_TIMEOUT_SECONDS,
+    DATAFORGE_EXPORT_TOTAL_TIMEOUT_SECONDS,
+    SUBPROCESS_CAPTURE_TAIL_CHARS,
+    SUBPROCESS_CLEANUP_TIMEOUT_SECONDS,
+    SUBPROCESS_DIAGNOSTIC_TAIL_CHARS,
+    SUBPROCESS_OUTPUT_CHUNK_BYTES,
+    SUBPROCESS_OUTPUT_QUEUE_SIZE,
+    SUBPROCESS_PROGRESS_LINE_CHARS,
+    SUBPROCESS_READER_POLL_SECONDS,
+)
+from src.utils.dataforge_contract import DATAFORGE_KEEP_FILE_GLOBS, DATAFORGE_KEEP_SUBPATHS
 from src.utils.file_utils import robust_rmtree
 from src.utils.perf import timed
 
@@ -56,10 +72,17 @@ _GLOBAL_INI_RELATIVE = Path("data/Localization/english/global.ini")
 # ``tests/test_pak_extraction.py`` derives generator reads from its AST and
 # verifies they remain covered by this contract.
 DATAFORGE_IDENTITY_FILE = ".dataforge_identity.json"
-DATAFORGE_CACHE_SCHEMA_VERSION = 2
+DATAFORGE_CACHE_SCHEMA_VERSION = 3
 DATAFORGE_PRISTINE_DIR = "pristine"
 DATAFORGE_PATCHED_DIR = "raw"
 DATAFORGE_REQUIRED_HEALTH_SUBPATHS = ("entities/scitem", "entities/spaceships")
+_EXPORT_ERROR_DETAIL_LIMIT = 5
+_HEALTH_PROGRESS_INTERVAL = 256
+DATAFORGE_EXPORT_MANIFEST = ".unforge-export.json"
+_DCB_HEADER_SIZE = 0x78
+_DCB_TABLE_ROW_SIZES = (16, 12, 8, 8)
+_EXPORT_ALLOWED_GUARDS = frozenset({"struct_cycle", "record_cycle", "empty_structure"})
+_EXPORT_PROGRESS_INTERVAL = 5000
 
 # Staging/backup directory suffixes only need to be unique for the lifetime
 # of a single extraction on one machine, not globally unique. A short suffix
@@ -79,9 +102,13 @@ class DataForgeHealthReport:
     """Essential DataForge cache health evidence collected before activation."""
 
     xml_counts: dict[str, int]
+    export_error_files: tuple[str, ...] = ()
 
     def summary_line(self) -> str:
-        return ", ".join(f"{path}: {count} XML" for path, count in self.xml_counts.items())
+        summary = ", ".join(f"{path}: {count} usable XML" for path, count in self.xml_counts.items())
+        if self.export_error_files:
+            summary += f"; {len(self.export_error_files)} files contain export errors"
+        return summary
 
 
 def _copy_filtered_records(src_libs: Path, dst_libs: Path) -> tuple[int, int]:
@@ -93,7 +120,7 @@ def _copy_filtered_records(src_libs: Path, dst_libs: Path) -> tuple[int, int]:
     is left in the temp dir and dropped when the surrounding TemporaryDirectory
     context exits.
 
-    Returns ``(copied, skipped)`` — the number of keep-subpaths actually
+    Returns ``(copied, skipped)`` — the number of subpaths or file patterns actually
     present and copied, and the number that weren't in this game build
     (common for ``entities/missions`` etc. which appear and disappear between
     patches — the generator already guards each read with ``if dir.exists()``).
@@ -123,25 +150,201 @@ def _copy_filtered_records(src_libs: Path, dst_libs: Path) -> tuple[int, int]:
         shutil.copytree(src, dst)
         copied += 1
 
+    manifest_path = src_libs.parent / DATAFORGE_EXPORT_MANIFEST
+    manifest_records = (
+        json.loads(manifest_path.read_text(encoding="utf-8"))["records"] if manifest_path.exists() else []
+    )
+    for pattern in DATAFORGE_KEEP_FILE_GLOBS:
+        files = sorted(records_src.glob(pattern))
+        for record in manifest_records:
+            original = record["originalPath"].replace("\\", "/")
+            if original.startswith("libs/foundry/records/") and PurePosixPath(
+                original.removeprefix("libs/foundry/records/")
+            ).match(pattern):
+                source = src_libs.parent / record["actualOutputPath"]
+                if source not in files:
+                    files.append(source)
+        if not files:
+            skipped += 1
+            continue
+        for src in files:
+            dst = records_dst / src.relative_to(records_src)
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+        copied += 1
+
     return copied, skipped
 
 
-def validate_dataforge_cache(cache_dir: Path) -> DataForgeHealthReport:
-    """Require parseable XML in the essential patched DataForge subtrees."""
+def _validate_dataforge_export(dcb_path: Path, progress_callback=None) -> Path:
+    from src.utils.tools_manager import TOOLS_VERSION
+
+    manifest_path = dcb_path.parent / DATAFORGE_EXPORT_MANIFEST
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        with dcb_path.open("rb") as stream:
+            header = stream.read(_DCB_HEADER_SIZE)
+            if len(header) != _DCB_HEADER_SIZE:
+                raise ValueError("Truncated DCB header")
+            version = struct.unpack_from("<i", header, 4)[0]
+            if version not in (6, 7, 8):
+                raise ValueError(f"Unsupported DCB version {version}")
+            counts = struct.unpack_from("<5i", header, 16)
+            if any(count < 0 for count in counts) or counts[-1] == 0:
+                raise ValueError("Invalid DCB table counts")
+            record_size = 36 if version >= 8 else 32
+            record_offset = _DCB_HEADER_SIZE + sum(
+                count * size for count, size in zip(counts[:4], _DCB_TABLE_ROW_SIZES, strict=True)
+            )
+            if record_offset + counts[-1] * record_size > dcb_path.stat().st_size:
+                raise ValueError("Truncated DCB record table")
+            stream.seek(record_offset)
+            binary_records = {}
+            for _ in range(counts[-1]):
+                row = stream.read(record_size)
+                struct_offset = 12 if version >= 8 else 8
+                raw_guid = row[struct_offset + 4 : struct_offset + 20]
+                guid = str(
+                    uuid.UUID(bytes=raw_guid[4:8][::-1] + raw_guid[2:4][::-1] + raw_guid[:2][::-1] + raw_guid[8:][::-1])
+                )
+                if guid in binary_records:
+                    raise ValueError("Duplicate binary UUID")
+                binary_records[guid] = (
+                    struct.unpack_from("<I", row, struct_offset)[0],
+                    *struct.unpack_from("<HH", row, record_size - 4),
+                )
+            stream.seek(0)
+            source_hash = hashlib.file_digest(stream, "sha256").hexdigest()
+        if (
+            not isinstance(manifest, dict)
+            or manifest.get("schema") != 1
+            or manifest.get("toolVersion") != TOOLS_VERSION
+            or manifest.get("complete") is not True
+        ):
+            raise ValueError("Missing completed pinned-exporter manifest")
+        if manifest.get("sourceSize") != dcb_path.stat().st_size or manifest.get("sourceSha256") != source_hash:
+            raise ValueError("Manifest source identity mismatch")
+        if manifest.get("expectedRecords") != counts[-1] or manifest.get("exportedRecords") != counts[-1]:
+            raise ValueError("Manifest record count mismatch")
+        if manifest.get("errors") != 0 or manifest.get("truncations") != 0:
+            raise ValueError("Exporter errors or truncation reported")
+        records = manifest["records"]
+        if not isinstance(records, list) or len(records) != counts[-1]:
+            raise ValueError("Incomplete manifest record list")
+        seen_ids = set()
+        seen_paths = set()
+        empty_count = 0
+        aggregate_guards = {}
+        output_root = dcb_path.parent.resolve()
+        for record in records:
+            guid = record["guid"]
+            metadata = (record["structIndex"], record["variant"], record["recordSize"])
+            if guid in seen_ids or binary_records.get(guid) != metadata:
+                raise ValueError("Duplicate or mismatched record UUID/metadata")
+            seen_ids.add(guid)
+            relative = record["actualOutputPath"]
+            parts = relative.replace("\\", "/").split("/")
+            path = output_root.joinpath(*parts).resolve()
+            if any(part in ("", ".", "..") or ":" in part for part in parts) or output_root not in path.parents:
+                raise ValueError("Unsafe manifest output path")
+            normalized = relative.replace("\\", "/").casefold()
+            if normalized in seen_paths or not relative.endswith(".xml"):
+                raise ValueError("Duplicate or invalid manifest output path")
+            seen_paths.add(normalized)
+            guards = record["guards"]
+            if not isinstance(guards, dict) or any(
+                key not in _EXPORT_ALLOWED_GUARDS or type(value) is not int or value <= 0
+                for key, value in guards.items()
+            ):
+                raise ValueError("Exporter truncation or invalid guard")
+            for key, value in guards.items():
+                aggregate_guards[key] = aggregate_guards.get(key, 0) + value
+            root = ET.parse(path).getroot()
+            if root.get("__ref") != guid or root.get("__path") != record["originalPath"] or not root.get("__type"):
+                raise ValueError("Serialized root metadata mismatch")
+            if root.get("__recordName", root.tag) != record["originalName"]:
+                raise ValueError("Serialized root name mismatch")
+            if record["status"] == "empty":
+                empty_count += 1
+                if (
+                    set(guards) != {"empty_structure"}
+                    or len(root)
+                    or (root.text or "").strip()
+                    or any(not key.startswith("__") for key in root.attrib)
+                ):
+                    raise ValueError("Metadata-only record lacks empty-body proof")
+            elif record["status"] != "exported":
+                raise ValueError("Record was not exported")
+            for element in root.iter():
+                values = (*element.attrib.values(), (element.text or "").strip(), (element.tail or "").strip())
+                if element.tag.rsplit("}", 1)[-1] == "Error" or any(
+                    value == "TBC" or value.startswith(("Error reading ", "Unhandled Type ")) for value in values
+                ):
+                    raise ValueError("Serialized exporter error")
+            if progress_callback and len(seen_ids) % _EXPORT_PROGRESS_INTERVAL == 0:
+                progress_callback(f"Validating exported records: {len(seen_ids):,} / {counts[-1]:,}")
+        if (
+            seen_ids != binary_records.keys()
+            or empty_count != manifest.get("emptyRecords")
+            or aggregate_guards != manifest.get("guards")
+        ):
+            raise ValueError("Manifest completeness/statistics mismatch")
+        actual_paths = {
+            path.relative_to(output_root).as_posix().casefold() for path in (output_root / "libs").rglob("*.xml")
+        }
+        if actual_paths != seen_paths:
+            raise ValueError("Serialized XML set differs from manifest")
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, ET.ParseError, struct.error) as exc:
+        raise RuntimeError(f"DataForge export integrity check failed: {exc}") from exc
+    logger.info(
+        "DataForge export integrity passed: %d UUID roots; %d empty; guards %s",
+        len(seen_ids),
+        empty_count,
+        aggregate_guards,
+    )
+    return manifest_path
+
+
+def validate_dataforge_cache(
+    cache_dir: Path, progress_callback: Callable[[str], None] | None = None
+) -> DataForgeHealthReport:
+    """Require usable essential XML and report incomplete exporter output."""
     records = cache_dir / DATAFORGE_PATCHED_DIR / "libs" / "foundry" / "records"
-    counts: dict[str, int] = {}
-    for subpath in DATAFORGE_REQUIRED_HEALTH_SUBPATHS:
-        count = 0
-        for xml_file in (records / subpath).rglob("*.xml"):
-            count += 1
-            try:
-                ET.parse(xml_file)
-            except ET.ParseError as exc:
-                raise RuntimeError(f"DataForge health check failed: invalid XML in {xml_file}: {exc}") from exc
+    counts = dict.fromkeys(DATAFORGE_REQUIRED_HEALTH_SUBPATHS, 0)
+    export_errors: list[str] = []
+    if progress_callback:
+        progress_callback("Checking cached DataForge records…")
+    files = sorted(records.rglob("*.xml"))
+    if progress_callback:
+        progress_callback(f"Checking cached records: 0 / {len(files):,}")
+    for index, xml_file in enumerate(files, start=1):
+        if progress_callback and index % _HEALTH_PROGRESS_INTERVAL == 0:
+            progress_callback(f"Checking cached records: {index:,} / {len(files):,}")
+        relative_path = xml_file.relative_to(records).as_posix()
+        try:
+            root = ET.parse(xml_file).getroot()
+        except ET.ParseError as exc:
+            raise RuntimeError(f"DataForge health check failed: invalid XML in {xml_file}: {exc}") from exc
+        if any(elem.tag.rsplit("}", 1)[-1] == "Error" for elem in root.iter()):
+            export_errors.append(relative_path)
+            if len(export_errors) <= _EXPORT_ERROR_DETAIL_LIMIT:
+                logger.warning("DataForge incomplete XML export: %s", relative_path)
+            continue
+        for subpath in counts:
+            if relative_path.startswith(subpath + "/"):
+                counts[subpath] += 1
+    if export_errors:
+        logger.warning(
+            "DataForge export errors in %d files; showing at most %d paths, full paths retained in health report",
+            len(export_errors),
+            _EXPORT_ERROR_DETAIL_LIMIT,
+        )
+    for subpath, count in counts.items():
         if count == 0:
-            raise RuntimeError(f"DataForge health check failed: no XML files under required subtree {subpath}")
-        counts[subpath] = count
-    return DataForgeHealthReport(xml_counts=counts)
+            raise RuntimeError(f"DataForge health check failed: no usable XML files under required subtree {subpath}")
+    if progress_callback:
+        progress_callback(f"Checking cached records: {len(files):,} / {len(files):,}")
+    return DataForgeHealthReport(xml_counts=counts, export_error_files=tuple(export_errors))
 
 
 def _has_required_dataforge_xml(cache_dir: Path) -> bool:
@@ -262,6 +465,7 @@ def rebuild_patched_dataforge_cache(
     cache_dir: Path,
     patch_fingerprint: str,
     finalize_callback: Callable[[Path], None],
+    progress_callback: Callable[[str], None] | None = None,
 ) -> bool:
     """Rebuild the patched ``raw`` tree from immutable ``pristine`` XML when patches change."""
     _recover_dataforge_layer(cache_dir, DATAFORGE_PATCHED_DIR)
@@ -277,7 +481,7 @@ def rebuild_patched_dataforge_cache(
     try:
         shutil.copytree(pristine_libs, staging_root / DATAFORGE_PATCHED_DIR / "libs")
         finalize_callback(staging_root)
-        health = validate_dataforge_cache(staging_root)
+        health = validate_dataforge_cache(staging_root, progress_callback)
         logger.info("DataForge patched-cache health check passed: %s", health.summary_line())
         _replace_dataforge_cache(staging_root / DATAFORGE_PATCHED_DIR, cache_dir / DATAFORGE_PATCHED_DIR)
         identity["patch_fingerprint"] = patch_fingerprint
@@ -288,16 +492,37 @@ def rebuild_patched_dataforge_cache(
             robust_rmtree(staging_root)
 
 
+class _SubprocessOutputTimeout(subprocess.TimeoutExpired):
+    def __init__(self, args, timeout, reason, output=None, stderr=None):
+        super().__init__(args, timeout, output=output, stderr=stderr)
+        self.reason = reason
+
+    def __str__(self):
+        stdout = self.output.decode(errors="replace") if isinstance(self.output, bytes) else self.output or ""
+        stderr = self.stderr.decode(errors="replace") if isinstance(self.stderr, bytes) else self.stderr or ""
+        stdout = stdout.strip()[-SUBPROCESS_DIAGNOSTIC_TAIL_CHARS:]
+        stderr = stderr.strip()[-SUBPROCESS_DIAGNOSTIC_TAIL_CHARS:]
+        return (
+            f"Subprocess {self.reason} ({self.timeout} seconds); last output:"
+            f"\nstdout:\n{stdout or '(empty)'}\nstderr:\n{stderr or '(empty)'}"
+        )
+
+
 def _run_subprocess(
     args: list[str],
     *,
     cwd: str | None = None,
     timeout: int | float | None = None,
+    progress_callback: Callable[[str], None] | None = None,
+    idle_timeout: int | float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a subprocess with stdout/stderr capture and no console window.
 
     Uses Popen so the active process is registered in ``_active_procs`` and
     can be killed from the main thread if the app closes mid-extraction.
+    Streaming callbacks run only on this caller's thread. Nonblocking pipe
+    readers can stop even if a descendant retains an inherited pipe handle.
+    Streaming captures retain only a bounded diagnostic tail per stream.
     """
     flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)) if sys.platform == "win32" else 0
     proc = subprocess.Popen(
@@ -312,11 +537,146 @@ def _run_subprocess(
     with _active_procs_lock:
         _active_procs[tid] = proc
     try:
+        if progress_callback is not None or idle_timeout is not None:
+            events: queue.Queue = queue.Queue(maxsize=SUBPROCESS_OUTPUT_QUEUE_SIZE)
+            stopping = threading.Event()
+            readers: list[threading.Thread] = []
+            captured = {"stdout": "", "stderr": ""}
+            pending = {"stdout": "", "stderr": ""}
+            started = last_output = time.monotonic()
+
+            def enqueue(event):
+                while True:
+                    try:
+                        events.put(event, timeout=SUBPROCESS_READER_POLL_SECONDS)
+                        return True
+                    except queue.Full:
+                        if stopping.is_set():
+                            return False
+
+            def read_stream(name, stream):
+                try:
+                    os.set_blocking(stream.fileno(), False)
+                    decoder = io.IncrementalNewlineDecoder(codecs.getincrementaldecoder(stream.encoding)(), True)
+                    while True:
+                        try:
+                            chunk = os.read(stream.fileno(), SUBPROCESS_OUTPUT_CHUNK_BYTES)
+                        except BlockingIOError:
+                            if stopping.is_set():
+                                break
+                            stopping.wait(SUBPROCESS_READER_POLL_SECONDS)
+                            continue
+                        if not chunk:
+                            tail = decoder.decode(b"", final=True)
+                            if tail:
+                                enqueue((name, tail, time.monotonic()))
+                            break
+                        if not enqueue((name, decoder.decode(chunk), time.monotonic())):
+                            break
+                except Exception as exc:
+                    enqueue((name, exc, time.monotonic()))
+                finally:
+                    stream.close()
+                    enqueue((name, None, time.monotonic()))
+
+            def consume(event, notify=True):
+                nonlocal last_output
+                name, text, observed = event
+                if isinstance(text, Exception):
+                    if notify:
+                        raise text
+                    return
+                if text is None:
+                    finished.add(name)
+                    text = ""
+                else:
+                    captured[name] = (captured[name] + text)[-SUBPROCESS_CAPTURE_TAIL_CHARS:]
+                    last_output = max(last_output, observed)
+                if not notify or progress_callback is None:
+                    pending[name] = ""
+                    return
+                pending[name] += text
+                while pending[name]:
+                    newline = pending[name].find("\n", 0, SUBPROCESS_PROGRESS_LINE_CHARS)
+                    if newline >= 0:
+                        line = pending[name][:newline]
+                        pending[name] = pending[name][newline + 1 :]
+                    elif len(pending[name]) >= SUBPROCESS_PROGRESS_LINE_CHARS:
+                        line = pending[name][:SUBPROCESS_PROGRESS_LINE_CHARS]
+                        pending[name] = pending[name][SUBPROCESS_PROGRESS_LINE_CHARS:]
+                    elif name in finished:
+                        line, pending[name] = pending[name], ""
+                    else:
+                        break
+                    if line.strip():
+                        progress_callback(f"{name}: {line}")
+
+            finished: set[str] = set()
+            try:
+                for name, stream in (("stdout", proc.stdout), ("stderr", proc.stderr)):
+                    reader = threading.Thread(
+                        target=read_stream, args=(name, stream), name=f"export-{name}", daemon=True
+                    )
+                    readers.append(reader)
+                    reader.start()
+                while len(finished) < 2 or proc.poll() is None:
+                    now = time.monotonic()
+                    reason = ""
+                    limit = timeout
+                    if timeout is not None and now - started >= timeout:
+                        reason = "total time limit"
+                    elif idle_timeout is not None and now - last_output >= idle_timeout:
+                        try:
+                            consume(events.get_nowait())
+                        except queue.Empty:
+                            reason, limit = "no output", idle_timeout
+                        else:
+                            continue
+                    if reason:
+                        raise _SubprocessOutputTimeout(args, limit, reason)
+                    remaining = [SUBPROCESS_READER_POLL_SECONDS]
+                    if timeout is not None:
+                        remaining.append(timeout - (now - started))
+                    if idle_timeout is not None:
+                        remaining.append(idle_timeout - (now - last_output))
+                    try:
+                        consume(events.get(timeout=max(0, min(remaining))))
+                    except queue.Empty:
+                        pass
+            except BaseException as exc:
+                stopping.set()
+                try:
+                    if proc.poll() is None:
+                        proc.kill()
+                    proc.wait(timeout=SUBPROCESS_CLEANUP_TIMEOUT_SECONDS)
+                except (OSError, subprocess.TimeoutExpired):
+                    logger.warning("Subprocess termination did not complete cleanly", exc_info=True)
+                for reader in readers:
+                    reader.join(SUBPROCESS_CLEANUP_TIMEOUT_SECONDS)
+                while not events.empty():
+                    consume(events.get_nowait(), notify=False)
+                if isinstance(exc, _SubprocessOutputTimeout):
+                    raise _SubprocessOutputTimeout(
+                        args,
+                        exc.timeout,
+                        exc.reason,
+                        output=captured["stdout"],
+                        stderr=captured["stderr"],
+                    ) from exc
+                raise
+            finally:
+                stopping.set()
+                for reader in readers:
+                    reader.join(SUBPROCESS_CLEANUP_TIMEOUT_SECONDS)
+            return subprocess.CompletedProcess(args, proc.returncode, captured["stdout"], captured["stderr"])
         try:
             stdout, stderr = proc.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
             proc.kill()
             stdout, stderr = proc.communicate()
+            exc.output = stdout
+            exc.stderr = stderr
+            raise
     finally:
         with _active_procs_lock:
             _active_procs.pop(tid, None)
@@ -475,19 +835,38 @@ def extract_dataforge(
         dcb_candidates = list(tmp.glob("Data/Game*.dcb"))
         if not dcb_candidates:
             raise FileNotFoundError("Game*.dcb not found in p4k output — check game install path.")
+        if len(dcb_candidates) != 1:
+            raise RuntimeError("Multiple Game*.dcb files found; refusing ambiguous extraction")
         dcb_path = dcb_candidates[0]
         logger.info(f"Found DCB: {dcb_path} ({dcb_path.stat().st_size / 1_048_576:.0f} MB)")
 
         # ── Step 2: Run unforge to produce entity XMLs ────────────────────────
         if progress_callback:
-            progress_callback("Converting DataForge database — this takes several minutes…")
+            progress_callback("Exporting DataForge records — allow tens of minutes for a first extraction…")
         if progress_pct_callback:
             progress_pct_callback(1, TOTAL_PHASES, "Converting DataForge database…")
         logger.info(f"Running unforge: {unforge_exe} {dcb_path}")
+
+        def export_progress(message):
+            stream, separator, detail = message.partition(": ")
+            if stream == "stdout" and separator:
+                friendly = f"DataForge Exporter Progress: {detail}"
+                if detail.startswith("Completed "):
+                    friendly = "DataForge Exporter Progress: Export complete"
+            elif stream == "stderr" and separator:
+                friendly = f"DataForge Exporter Diagnostic: {detail}"
+            else:
+                friendly = f"DataForge Exporter Progress: {message}"
+            if progress_callback:
+                progress_callback(friendly)
+            logger.info("%s", friendly)
+
         result = _run_subprocess(
             [str(unforge_exe), str(dcb_path)],
             cwd=str(tmp_dir),
-            timeout=1800,  # 30 minutes max
+            timeout=DATAFORGE_EXPORT_TOTAL_TIMEOUT_SECONDS,
+            idle_timeout=DATAFORGE_EXPORT_IDLE_TIMEOUT_SECONDS,
+            progress_callback=export_progress,
         )
         # A zero-length stdout + sub-second runtime is typically a silent
         # failure — e.g. AV quarantining a temp file, or unforge choking
@@ -496,11 +875,15 @@ def extract_dataforge(
         _stdout = (result.stdout or "").strip()
         _stderr = (result.stderr or "").strip()
         if _stdout:
-            logger.info(f"unforge stdout ({len(_stdout)} bytes, truncated): {_stdout[:2000]}")
+            logger.info(f"unforge stdout ({len(_stdout)} chars, tail): {_stdout[-SUBPROCESS_DIAGNOSTIC_TAIL_CHARS:]}")
         if _stderr:
-            logger.info(f"unforge stderr ({len(_stderr)} bytes, truncated): {_stderr[:2000]}")
+            logger.info(f"unforge stderr ({len(_stderr)} chars, tail): {_stderr[-SUBPROCESS_DIAGNOSTIC_TAIL_CHARS:]}")
         if result.returncode != 0:
-            raise RuntimeError(f"unforge.exe failed (code {result.returncode}):\n{_stderr or _stdout or '(no output)'}")
+            diagnostic = (
+                f"stdout:\n{_stdout[-SUBPROCESS_DIAGNOSTIC_TAIL_CHARS:] or '(empty)'}"
+                f"\nstderr:\n{_stderr[-SUBPROCESS_DIAGNOSTIC_TAIL_CHARS:] or '(empty)'}"
+            )
+            raise RuntimeError(f"unforge.exe failed (code {result.returncode}):\n{diagnostic}")
 
         # unforge writes entity XMLs into a libs/ subdirectory next to the
         # dcb file. When it's missing we surface whatever we captured from
@@ -511,8 +894,8 @@ def extract_dataforge(
             diagnostic = ""
             if _stdout or _stderr:
                 diagnostic = (
-                    f"\n\nunforge stdout:\n{_stdout[:1500] or '(empty)'}"
-                    f"\n\nunforge stderr:\n{_stderr[:1500] or '(empty)'}"
+                    f"\n\nunforge stdout:\n{_stdout[-SUBPROCESS_DIAGNOSTIC_TAIL_CHARS:] or '(empty)'}"
+                    f"\n\nunforge stderr:\n{_stderr[-SUBPROCESS_DIAGNOSTIC_TAIL_CHARS:] or '(empty)'}"
                 )
             else:
                 # Nothing on either stream and no libs/ — unforge exited
@@ -531,6 +914,10 @@ def extract_dataforge(
             raise FileNotFoundError(
                 "unforge ran but libs/ directory was not created — unexpected output structure." + diagnostic
             )
+
+        if progress_callback:
+            progress_callback("Validating exported DataForge records…")
+        export_manifest = _validate_dataforge_export(dcb_path, progress_callback)
 
         # ── Step 3: Cache the full extraction ─────────────────────────────────
         if progress_callback:
@@ -554,17 +941,19 @@ def extract_dataforge(
             logger.info(f"Saving staged pristine DataForge extraction to {pristine_dir}…")
             copied, skipped = _copy_filtered_records(libs_dir / "libs", pristine_dir / "libs")
             logger.info(
-                f"DataForge pristine cache written: {copied}/{len(DATAFORGE_KEEP_SUBPATHS)} "
+                f"DataForge pristine cache written: {copied}/{len(DATAFORGE_KEEP_SUBPATHS) + len(DATAFORGE_KEEP_FILE_GLOBS)} "
                 f"keep-subpaths copied ({skipped} not present in this build)"
             )
             shutil.copytree(pristine_dir / "libs", raw_dir / "libs")
+            shutil.copy2(export_manifest, staging_dir / DATAFORGE_EXPORT_MANIFEST)
 
             # Write a stamp so we know when this was extracted (p4k mtime).
             (staging_dir / ".p4k_mtime").write_text(str(p4k_path.stat().st_mtime))
             _write_dataforge_identity(staging_dir, p4k_path, unp4k_exe, unforge_exe, patch_fingerprint)
             if finalize_callback is not None:
                 finalize_callback(staging_dir)
-            health = validate_dataforge_cache(staging_dir)
+            logger.info("Checking staged DataForge cache health")
+            health = validate_dataforge_cache(staging_dir, progress_callback)
             logger.info("DataForge health check passed: %s", health.summary_line())
             _replace_dataforge_cache(staging_dir, dataforge_cache_dir)
             logger.info(f"DataForge cache written to {dataforge_cache_dir}")

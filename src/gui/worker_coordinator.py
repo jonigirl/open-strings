@@ -47,6 +47,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _WORKER_QUIT_TIMEOUT_MS = 5_000  # generous — avoids deadlock
+_EXTRACTION_NOTICE = "Extracting DataForge data. First extraction can take 30 minutes or longer."
 
 
 class WorkerCoordinator(QObject):
@@ -93,6 +94,7 @@ class WorkerCoordinator(QObject):
         self._startup_sync_worker: StartupSyncWorker | None = None
         self._p4k_worker: P4kExtractWorker | None = None
         self._enhancements_worker: EnhancementsGeneratorWorker | None = None
+        self.enhancements_changed = False
         self._forge_worker: DataForgeExtractWorker | None = None
 
         # ── Progress dialogs ──────────────────────────────────────────────
@@ -244,11 +246,11 @@ class WorkerCoordinator(QObject):
 
         label = "Extracting DataForge from Data.p4k…"
         self.dataforge_operation_running.emit(label)
-        self._parent.status_bar_mgr.show_message("Extracting DataForge in background — this takes several minutes…")
+        self._parent.status_bar_mgr.show_message(_EXTRACTION_NOTICE)
         self._parent.start_spinner()
 
         self._forge_progress_dialog = AnimatedProgressDialog(
-            "Extracting DataForge from Data.p4k — this takes several minutes…",
+            _EXTRACTION_NOTICE,
             parent=self._parent,
             title="DataForge Extraction",
         )
@@ -310,6 +312,7 @@ class WorkerCoordinator(QObject):
         if self._enhancements_worker is not None:
             return
 
+        self.enhancements_changed = False
         if categories is None:
             categories = AppSettings.get_enabled_enhancement_categories()
 
@@ -318,7 +321,7 @@ class WorkerCoordinator(QObject):
         self._parent.status_bar_mgr.show_message("Generating enhancements in background…")
 
         self._enhancements_progress_dialog = AnimatedProgressDialog(
-            "Generating enhanced localizations from DataForge…\n\nThis may take a few minutes on the first run.",
+            "Generating enhancements from cached DataForge records…",
             parent=self._parent,
             title="Generating Enhancements",
         )
@@ -345,6 +348,9 @@ class WorkerCoordinator(QObject):
 
     @pyqtSlot(bool)
     def _on_enhancements_done(self, success: bool) -> None:
+        self.enhancements_changed = bool(
+            success and self._enhancements_worker is not None and self._enhancements_worker.categories != set()
+        )
         self._parent.stop_spinner()
         if self._enhancements_progress_dialog is not None:
             self._enhancements_progress_dialog.close()

@@ -11,11 +11,13 @@ SmartScreen will still warn "Unknown Publisher" — that is expected.
 
 import argparse
 import glob
+import hashlib
 import importlib.util
 import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import PyInstaller.__main__
 
@@ -220,6 +222,12 @@ parser.add_argument(
     help="Sign an already-built file with the Certum cert and exit (used for installer signing).",
 )
 parser.add_argument(
+    "--unforge-package",
+    metavar="PATH",
+    default=os.environ.get("OPENSTRINGS_UNFORGE_PACKAGE"),
+    help="Bundle the digest-pinned patched extractor ZIP beside the executable.",
+)
+parser.add_argument(
     "--cleanup-certs",
     action="store_true",
     default=False,
@@ -253,6 +261,15 @@ root_dir = os.path.dirname(os.path.dirname(project_dir))
 
 # Add src to path for imports
 sys.path.insert(0, os.path.join(root_dir, "src"))
+sys.path.insert(0, root_dir)
+
+unforge_payload = None
+if args.unforge_package:
+    from src.utils.tools_manager import _UNFORGE_SHA256, BUNDLED_UNFORGE_ASSET
+
+    unforge_payload = Path(args.unforge_package).read_bytes()
+    if hashlib.sha256(unforge_payload).hexdigest() != _UNFORGE_SHA256:
+        raise RuntimeError("Bundled unforge package SHA-256 mismatch; refusing build")
 
 # Get version from VERSION.TXT
 version_file = os.path.join(root_dir, "VERSION.TXT")
@@ -300,6 +317,11 @@ except Exception as e:
     sys.exit(1)
 
 exe_path = os.path.join(root_dir, "dist", "OpenStrings", "OpenStrings.exe")
+if unforge_payload is not None:
+    bundle_dir = Path(exe_path).parent / "tools"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    (bundle_dir / BUNDLED_UNFORGE_ASSET).write_bytes(unforge_payload)
+    print("  - Verified patched extractor package bundled")
 if not os.path.isfile(exe_path):
     print(f"WARNING: built exe not found at expected path: {exe_path}")
 elif args.sign:

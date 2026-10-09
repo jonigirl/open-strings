@@ -208,7 +208,64 @@ class TestDirtyCategories:
 
         result = dirty_categories(tmp_path)
 
-        assert result == {"components", "ship_weapons", "commodities", "journal"}
+        assert result == {"ships", "components", "ship_weapons", "fps_weapons", "missions", "commodities", "journal"}
+
+    @pytest.mark.parametrize(
+        "subpath",
+        [
+            "ships/controller",
+            "ships/armor",
+            "weapons/magazines",
+            "weapons/weapon_modifier",
+            "ships/fuel_intakes",
+            "ships/fueltanks",
+            "ships/lifesupport",
+            "ships/countermeasures",
+            "ships/missiles",
+            "carryables",
+        ],
+    )
+    def test_shared_scitem_change_routes_to_translated_outputs(self, tmp_path, subpath):
+        from src.utils.app_constants import DIFF_CATEGORY_TO_GENERATOR_KEYS, ENHANCEMENTS_FILES
+
+        source = tmp_path / "foundry/records/entities/scitem" / subpath / "example.xml"
+        _write_xml(source, '<Record value="A"/>')
+        update_manifest(tmp_path)
+        _write_xml(source, '<Record value="B"/>')
+        dirty = dirty_categories(tmp_path)
+        translated = {key for category in dirty for key in DIFF_CATEGORY_TO_GENERATOR_KEYS[category]}
+        assert translated == set(ENHANCEMENTS_FILES)
+
+    def test_spaceship_change_routes_to_ships_and_mission_names(self, tmp_path):
+        from src.utils.app_constants import DIFF_CATEGORY_TO_GENERATOR_KEYS
+
+        source = tmp_path / "foundry/records/entities/spaceships/example.xml"
+        _write_xml(source, '<Record value="A"/>')
+        update_manifest(tmp_path)
+        _write_xml(source, '<Record value="B"/>')
+        translated = {
+            key for category in dirty_categories(tmp_path) for key in DIFF_CATEGORY_TO_GENERATOR_KEYS[category]
+        }
+        assert translated == {"ship_descs", "mission_rewards"}
+
+    @pytest.mark.parametrize(
+        "entity_path",
+        [
+            "entities/groundvehicles/example.xml",
+            "actor/actors/argo_atls_example.xml",
+            "actor/actors/00000000-0000-0000-0000-000000000001.xml",
+        ],
+    )
+    def test_new_reward_name_change_routes_to_missions(self, tmp_path, entity_path):
+        from src.utils.app_constants import DIFF_CATEGORY_TO_GENERATOR_KEYS
+
+        source = tmp_path / "foundry/records" / entity_path
+        _write_xml(source, '<Record value="A"/>')
+        update_manifest(tmp_path)
+        _write_xml(source, '<Record value="B"/>')
+        dirty = dirty_categories(tmp_path)
+        assert dirty == {"missions"}
+        assert {key for category in dirty for key in DIFF_CATEGORY_TO_GENERATOR_KEYS[category]} == {"mission_rewards"}
 
     def test_returns_empty_set_when_content_unchanged_despite_mtime(self, tmp_path: Path) -> None:
         ship = tmp_path / "foundry" / "records" / "entities" / "spaceships" / "ship.xml"

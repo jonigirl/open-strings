@@ -9,8 +9,10 @@ Open Strings is a fork of [Smart Citizen by Osiris DevWorks](https://github.com/
 ## Features
 
 - **Multi-channel support** — LIVE / PTU / EPTU / HOTFIX / TECH-PREVIEW each get an isolated workspace (independent `user.ini`, cache, backups, DataForge extraction, enhancement INIs).
-- **Sourced from Data.p4k** — stock localization and DataForge entity data are unpacked directly from your installed game; no community mirrors, no network needed.
+- **Sourced from Data.p4k** — stock localization and DataForge entity data are unpacked directly from your installed game; no community mirrors. Extraction works offline once the tools are cached.
 - **Inline editing with live preview** — double-click any cell to edit; preview pane renders loc-tokens (line breaks, EM3/EM4 emphasis, mission placeholders) as styled HTML.
+- **Column filters** — filter Category, Favourite, and Status values, and match text using Contains, Exact, Starts with, or Excludes.
+- **Detachable log viewer** — monitor extraction and generation in a separate non-modal window without losing the log buffer.
 - **Launcher menu heading** — rename the heading shown in the Star Citizen launcher; optionally show the Open Strings version suffix.
 - **Auto-generated enhancements** — stat overlays for ships, components, weapons, missions, journal entries, and commodity crafting; togglable per category.
 - **Safe apply** — timestamped backups before every write, automatic rollback on validation mismatch, up to 5 backups per channel.
@@ -26,11 +28,28 @@ DataForge uses a protected two-layer cache: a pristine extraction and a patched 
 copy. Game or extraction-tool updates rebuild both layers; an Open Strings patch update
 rebuilds only the working copy before regenerating enhancements.
 
+Version 1.5.2 uses a pinned patched unforge exporter that preserves records sharing a
+source path and repairs invalid XML record names. A completion manifest is checked
+against the DCB record index before a new cache becomes live. Updating from an older
+exporter requires one extraction per channel; saved overrides are preserved.
+
+Initial extraction can take 30 minutes or longer. The Log tab shows live exporter
+progress, and cache health checks show their own record counts. Exports stop after
+two hours overall or 30 minutes without output, leaving the previous cache intact.
+
+Record coverage does not guarantee that every game reference resolves. Undefined
+references in the game data and cyclic structures are reported rather than replaced
+with invented values.
+
 ## Download & Installation
 
-**Important:** Current releases are **not code-signed**. Windows Defender SmartScreen will show a warning on first launch. This is expected — Open Strings is a hobby project and code-signing certificates cost money. You can safely bypass the warning by clicking "More info" → "Run anyway" if you trust the source.
+Release installers and their embedded executable are code-signed. SmartScreen may
+still warn while a release establishes download reputation; verify the digital
+signature before running it.
 
-A trusted code-signing certificate is planned for future releases.
+Missing extraction tools are downloaded as needed. When a build includes the patched
+unforge ZIP, it is installed from that local bundle instead. The patched package is
+verified against its pinned SHA-256 checksum before extraction.
 
 ## Install (from source)
 
@@ -67,4 +86,5 @@ Games or Roberts Space Industries.
 
 ## Licence
 
-GPL-3.0-only. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md).
+GPL-3.0-only. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md). The patched tool
+package includes the project GPL license and the original upstream MIT notice.

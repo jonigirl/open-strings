@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 # Column count for the filter table: Category / Key / Default / Original / Star / Custom / Status
 _NUM_FILTER_COLUMNS = 7
+FILTER_MATCH_MODES = ("contains", "exact", "starts_with", "excludes")
 
 
 def filter_entry_indices(
@@ -23,6 +24,7 @@ def filter_entry_indices(
     hide_unmodified: bool,
     favorites_only: bool,
     favorite_prefix: str,
+    column_filter_modes: list[str] | None = None,
 ) -> list[int]:
     """Return indices of entries that pass all active filters.
 
@@ -43,7 +45,10 @@ def filter_entry_indices(
         Ordered list of integer indices into *entries* for rows that should
         be visible.
     """
-    active_col_filters = [(i, t) for i, t in enumerate(column_filters) if t]
+    active_col_filters = [(i, text.lower()) for i, text in enumerate(column_filters) if text]
+    modes = column_filter_modes or []
+    if any(mode not in FILTER_MATCH_MODES for mode in modes):
+        raise ValueError("Unsupported column filter match mode")
 
     # Validate column indices once, before the hot per-entry loop.
     # Stale filters (e.g. after a column layout change) would cause IndexError
@@ -70,11 +75,14 @@ def filter_entry_indices(
             lambda e: e.key.lower(),
             lambda e: default_values.get(e.key, "").lower(),
             lambda e: e.original_value.lower(),
-            lambda e: "★" if e.custom_value.startswith(favorite_prefix) else "",
+            lambda e: "★" if e.category == "Ships" and e.custom_value.startswith(favorite_prefix) else "",
             lambda e: e.custom_value.lower(),
             lambda e: e.status.lower(),
         )
-        active_filter_fns: list = [(_col_getters[i], t) for i, t in active_col_filters]
+        active_filter_fns: list = [
+            (_col_getters[index], text, modes[index] if index < len(modes) else "contains")
+            for index, text in active_col_filters
+        ]
     else:
         active_filter_fns = []
 
@@ -92,8 +100,17 @@ def filter_entry_indices(
         elif favorites_only and not entry.custom_value.startswith(favorite_prefix):
             show = False
         elif active_filter_fns:
-            for get_val, filter_text in active_filter_fns:
-                if filter_text not in get_val(entry):
+            for get_val, filter_text, mode in active_filter_fns:
+                value = get_val(entry)
+                if mode == "exact":
+                    matches = value == filter_text
+                elif mode == "starts_with":
+                    matches = value.startswith(filter_text)
+                elif mode == "excludes":
+                    matches = filter_text not in value
+                else:
+                    matches = filter_text in value
+                if not matches:
                     show = False
                     break
 
