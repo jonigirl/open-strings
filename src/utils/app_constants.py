@@ -53,6 +53,7 @@ ENHANCEMENTS_FILES: dict[str, str] = {
     "ship_weapon_descs": "ship_weapons_desc_enhancements.ini",
     "fps_weapon_descs": "fps_weapons_desc_enhancements.ini",
     "fps_attachment_descs": "fps_attachments_enhancements.ini",
+    "fps_armor_descs": "fps_armor_enhancements.ini",
     "ship_fuel_descs": "ship_fuel_enhancements.ini",
     "countermeasure_descs": "countermeasure_enhancements.ini",
     "lifesupport_descs": "lifesupport_enhancements.ini",
@@ -67,6 +68,7 @@ ENHANCEMENT_LABELS: dict[str, str] = {
     "ships": "Ships",
     "ship_items": "Ship Items",
     "gear": "Gear",
+    "armor": "Armor & Suits",
     "missions": "Missions",
     "commodities": "Commodities",
     "journal": "Journal",
@@ -84,6 +86,7 @@ ENHANCEMENT_CATEGORY_FILES: dict[str, list[str]] = {
         "lifesupport_descs",
     ],
     "gear": ["fps_weapon_descs", "fps_attachment_descs"],
+    "armor": ["fps_armor_descs"],
     "missions": ["mission_rewards"],
     "commodities": ["commodity_crafting"],
     "journal": ["journal"],
@@ -94,7 +97,7 @@ ENHANCEMENT_CATEGORY_FILES: dict[str, list[str]] = {
 # generator's internal vocabulary.
 DIFF_CATEGORY_TO_GENERATOR_KEYS: dict[str, list[str]] = {
     "ships": ["ship_descs"],
-    "components": ["component_descs"],
+    "components": ["component_descs", "fps_armor_descs"],
     "ship_weapons": [
         "ship_weapon_descs",
         "missile_enhancements",

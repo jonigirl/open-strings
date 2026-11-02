@@ -103,6 +103,7 @@ ENHANCEMENT_OUTPUT_FILES: dict[str, str] = {
     "ship_weapon_descs": "ship_weapons_desc_enhancements.ini",
     "fps_weapon_descs": "fps_weapons_desc_enhancements.ini",
     "fps_attachment_descs": "fps_attachments_enhancements.ini",
+    "fps_armor_descs": "fps_armor_enhancements.ini",
     "ship_fuel_descs": "ship_fuel_enhancements.ini",
     "countermeasure_descs": "countermeasure_enhancements.ini",
     "lifesupport_descs": "lifesupport_enhancements.ini",
@@ -1959,6 +1960,7 @@ _enh_formatters._fire_modes = _fire_modes
 _enh_formatters._poly_type = _poly_type
 
 enhancements_fps_attachment = _enh_formatters.enhancements_fps_attachment
+enhancements_fps_armor = _enh_formatters.enhancements_fps_armor
 enhancements_ship_fuel = _enh_formatters.enhancements_ship_fuel
 enhancements_countermeasure = _enh_formatters.enhancements_countermeasure
 enhancements_lifesupport = _enh_formatters.enhancements_lifesupport
@@ -2596,6 +2598,7 @@ def main(
         + (1 if _want("ship_weapon_descs") else 0)
         + (1 if _want("fps_weapon_descs") else 0)
         + (1 if _want("fps_attachment_descs") else 0)
+        + (1 if _want("fps_armor_descs") else 0)
         + (2 if _want("ship_descs") else 0)  # controller+armor lookup, scan
         + (1 if _want("ship_fuel_descs") else 0)
         + (1 if _want("countermeasure_descs") else 0)
@@ -2928,6 +2931,19 @@ def main(
             out = scan_entity_dir(mod_dir, enhancements_fps_attachment, loc=loc)
         logger.info(f"Finished FPS attachments ({len(out)} entries)")
         _tick("Generated FPS attachment descriptions")
+        return out
+
+    def _gen_fps_armor() -> dict[str, str]:
+        out: dict[str, str] = {}
+        armor_dirs = (
+            records / "entities" / "scitem" / "characters" / "human" / "armor",
+            records / "entities" / "scitem" / "characters" / "human" / "starwear" / "helmet",
+        )
+        for armor_dir in armor_dirs:
+            if armor_dir.exists():
+                out.update(scan_entity_dir(armor_dir, enhancements_fps_armor, loc=loc))
+        logger.info(f"Finished FPS armor ({len(out)} entries)")
+        _tick("Generated FPS armor descriptions")
         return out
 
     def _gen_ships() -> dict[str, str]:
@@ -3471,6 +3487,7 @@ def main(
         ("ship_weapon_descs", "ship_weapons", _gen_ship_weapons),
         ("fps_weapon_descs", "fps_weapons", _gen_fps_weapons),
         ("fps_attachment_descs", "fps_attachments", _gen_fps_attachments),
+        ("fps_armor_descs", "fps_armor", _gen_fps_armor),
         ("ship_descs", "ships", _gen_ships),
         ("ship_fuel_descs", "ship_fuel", _gen_ship_fuel),
         ("countermeasure_descs", "countermeasures", _gen_countermeasures),
@@ -3490,6 +3507,7 @@ def main(
         "ship_weapons": "ship_weapon_descs",
         "fps_weapons": "fps_weapon_descs",
         "fps_attachments": "fps_attachment_descs",
+        "fps_armor": "fps_armor_descs",
         "ships": "ship_descs",
         "ship_fuel": "ship_fuel_descs",
         "countermeasures": "countermeasure_descs",

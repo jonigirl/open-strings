@@ -73,7 +73,8 @@ class EnhancementsTab(QWidget):
         _CATEGORY_DESCRIPTIONS = {
             "ships": "Ship performance, loadout, and crew data",
             "ship_items": "Component class/size/grade annotations and statistics",
-            "gear": "Combat stats for FPS weapons",
+            "gear": "FPS weapon and attachment stats",
+            "armor": "Armor and suit signature emission and reduction data",
             "missions": "XP rewards and blueprint drops for missions",
             "commodities": "Crafting recipes and material usage",
             "journal": "Mining Compendium with crafting data per mineral",

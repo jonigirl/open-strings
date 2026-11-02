@@ -77,6 +77,7 @@ class TestEnhancementSettings:
         cats = AppSettings.get_enabled_enhancement_categories()
         assert "ship_descs" in cats
         assert "mission_rewards" in cats
+        assert "fps_armor_descs" in cats
 
     def test_enabled_enhancement_categories_one_off(self, isolated_qsettings):
         AppSettings.set_enhancement_category_enabled("missions", False)

@@ -121,6 +121,7 @@ def test_output_batch_restores_prior_files_when_publish_fails(gen_module, tmp_pa
         lambda m, r: m.enhancements_mission(r, {}),
         lambda m, r: m.enhancements_weapon(r, {}, None),
         lambda m, r: m.enhancements_fps_attachment(r),
+        lambda m, r: m.enhancements_fps_armor(r),
         lambda m, r: m.enhancements_ship_fuel(r),
         lambda m, r: m.enhancements_countermeasure(r),
         lambda m, r: m.enhancements_lifesupport(r),
@@ -150,6 +151,29 @@ def test_fps_attachment_formatter_outputs_weapon_mod_line(gen_module):
     assert "Weapon Mod:" in out
     assert "Spread:" in out
     assert "Component HP:" in out
+
+
+def test_fps_armor_formatter_outputs_signature_stats(gen_module):
+    root = _xml(
+        """
+        <Entity>
+          <TemperatureResistance MinResistance="-70" MaxResistance="100" />
+          <RadiationResistance MaximumRadiationCapacity="26800" RadiationDissipationRate="145.8" />
+          <ItemSuitArmorSignatureParams signatureType="Electromagnetic" signatureEmission="20"
+            signatureReductionWeighted="0" signatureReductionAbsolute="0" />
+          <ItemSuitArmorSignatureParams signatureType="Infrared" signatureEmission="0"
+            signatureReductionWeighted="0" signatureReductionAbsolute="65" />
+        </Entity>
+        """
+    )
+
+    out = gen_module.enhancements_fps_armor(root)
+
+    assert "Electromagnetic Signature: Emission: 20" in out
+    assert "Infrared Signature: Emission: 0" in out
+    assert "Absolute Reduction: 65" in out
+    assert "Temperature Resistance:" not in out
+    assert "Radiation:" not in out
 
 
 def test_ship_fuel_formatter_outputs_intake_and_capacity(gen_module):

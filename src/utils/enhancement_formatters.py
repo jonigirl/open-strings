@@ -782,6 +782,29 @@ def enhancements_ship_dataforge(
     return "\\n".join(lines)
 
 
+def enhancements_fps_armor(root: ET.Element) -> str:
+    lines: list[str] = []
+
+    for signature in root.iter():
+        if _poly_type(signature) != "ItemSuitArmorSignatureParams":
+            continue
+        signature_type = signature.get("signatureType", "")
+        signature_parts = []
+        for attribute, label in (
+            ("signatureEmission", "Emission"),
+            ("signatureReductionWeighted", "Weighted Reduction"),
+            ("signatureReductionAbsolute", "Absolute Reduction"),
+        ):
+            value = signature.get(attribute)
+            if value is not None:
+                signature_parts.append(f"{label}: {_fmt(value)}")
+        if signature_parts:
+            label = f"{signature_type} Signature" if signature_type else "Signature"
+            lines.append(f"{label}: " + "  |  ".join(signature_parts))
+
+    return "\\n".join(lines)
+
+
 def enhancements_fps_attachment(root: ET.Element) -> str:
     wm = _find(root, "SWeaponModifierComponentParams")
     if wm is None:
