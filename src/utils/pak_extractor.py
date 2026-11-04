@@ -234,7 +234,7 @@ def _validate_dataforge_export(dcb_path: Path, progress_callback=None) -> Path:
         seen_ids = set()
         seen_paths = set()
         empty_count = 0
-        aggregate_guards = {}
+        aggregate_guards: dict[str, int] = {}
         output_root = dcb_path.parent.resolve()
         for record in records:
             guid = record["guid"]
@@ -674,8 +674,9 @@ def _run_subprocess(
         except subprocess.TimeoutExpired as exc:
             proc.kill()
             stdout, stderr = proc.communicate()
-            exc.output = stdout
-            exc.stderr = stderr
+            # Text-mode pipes return str; typeshed only models bytes here.
+            exc.output = stdout  # type: ignore[assignment]
+            exc.stderr = stderr  # type: ignore[assignment]
             raise
     finally:
         with _active_procs_lock:

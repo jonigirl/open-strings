@@ -42,7 +42,7 @@ from src.gui.workers import (
 from src.utils.settings import AppSettings
 
 if TYPE_CHECKING:
-    from PyQt6.QtWidgets import QMainWindow
+    from src.gui.main_window import MainWindow
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,7 @@ class WorkerCoordinator(QObject):
     startup_source_error = pyqtSignal(str, str)
     startup_sync_finished = pyqtSignal()
 
-    def __init__(self, parent: QMainWindow) -> None:  # type: ignore[override]
+    def __init__(self, parent: MainWindow) -> None:  # type: ignore[override]
         super().__init__(parent)
         self._parent = parent
 

@@ -51,6 +51,7 @@ class FilterHeaderView(QHeaderView):
             layout.setContentsMargins(2, 0, 2, 0)
             layout.setSpacing(4)
             mode = None
+            editor: QComboBox | QLineEdit
             if i in (choice_columns or set()):
                 editor = QComboBox(panel)
                 if i == COL_STAR:

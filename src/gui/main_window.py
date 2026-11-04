@@ -11,16 +11,20 @@ from PyQt6.QtCore import QModelIndex, Qt, QTimer, QUrl, pyqtSlot
 from PyQt6.QtGui import QDesktopServices, QFont, QIcon
 from PyQt6.QtWidgets import (
     QApplication,
+    QCheckBox,
+    QComboBox,
     QDockWidget,
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMenu,
     QMessageBox,
     QPushButton,
     QSizePolicy,
     QStatusBar,
+    QTableView,
     QTabWidget,
     QTextBrowser,
     QVBoxLayout,
@@ -29,10 +33,12 @@ from PyQt6.QtWidgets import (
 
 from src.gui.config_tab import ConfigTab
 from src.gui.enhancements_tab import EnhancementsTab
+from src.gui.filter_header import FilterHeaderView
 from src.gui.log_tab import LogTab
 from src.gui.string_table_model import (
     COL_CUSTOM,
     COL_STAR,
+    StringTableModel,
 )
 from src.gui.theme import BRAND_FONT_FAMILY, get_button_color, get_button_text_color
 from src.gui.workers import (
@@ -60,6 +66,33 @@ _MAX_BACKUPS = 5
 
 class MainWindow(QMainWindow):
     """Main application window."""
+
+    # Assigned by window_setup builders during setup_ui().
+    open_loc_dir_btn: QPushButton
+    apply_btn: QPushButton
+    restore_backup_btn: QPushButton
+    clear_loc_btn: QPushButton
+    clear_cache_btn: QPushButton
+    export_locpack_btn: QPushButton
+    help_btn: QPushButton
+    tutorial_btn: QPushButton
+    category_combo: QComboBox
+    status_combo: QComboBox
+    hide_unmodified_check: QCheckBox
+    favorites_only_check: QCheckBox
+    grouped_sort_btn: QPushButton
+    clear_filters_btn: QPushButton
+    copy_filtered_btn: QPushButton
+    _model: StringTableModel
+    menu_heading_input: QLineEdit
+    reset_menu_heading_btn: QPushButton
+    show_frontend_stamp_check: QCheckBox
+    table: QTableView
+    filter_header: FilterHeaderView
+    table_status_label: QLabel
+    about_browser: QTextBrowser
+    _check_update_btn: QPushButton
+    help_browser: QTextBrowser
 
     def __init__(self):
         super().__init__()

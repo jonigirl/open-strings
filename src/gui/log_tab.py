@@ -129,7 +129,9 @@ class LogTab(QWidget):
         toolbar.addStretch()
 
         self._popout_btn = QPushButton("Pop Out")
-        self._popout_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_TitleBarMaxButton))
+        style = self.style()
+        assert style is not None
+        self._popout_btn.setIcon(style.standardIcon(QStyle.StandardPixmap.SP_TitleBarMaxButton))
         self._popout_btn.setToolTip("Move the live log into a separate window")
         self._popout_btn.clicked.connect(self._toggle_popout)
         toolbar.addWidget(self._popout_btn)

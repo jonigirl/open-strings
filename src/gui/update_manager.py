@@ -30,7 +30,7 @@ from src.utils.settings import AppSettings
 from src.utils.version import get_version
 
 if TYPE_CHECKING:
-    from PyQt6.QtWidgets import QMainWindow
+    from src.gui.main_window import MainWindow
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ class UpdateManager(QObject):
     Manual checks always run and always show feedback regardless of outcome.
     """
 
-    def __init__(self, parent: QMainWindow) -> None:  # type: ignore[override]
+    def __init__(self, parent: MainWindow) -> None:  # type: ignore[override]
         super().__init__(parent)
         self._parent = parent
         self._worker: AppUpdateCheckerWorker | None = None
