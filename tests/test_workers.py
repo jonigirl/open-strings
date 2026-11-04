@@ -299,6 +299,40 @@ class TestDataForgeWorkerManifest:
         load.assert_called_once()
         assert _base_ini_needs_regeneration(base, tmp_path, {"ship_descs"}) is False
 
+    def test_disabled_category_files_do_not_force_regeneration(self, monkeypatch, tmp_path):
+        from src.gui.workers import EnhancementsGeneratorWorker, _record_generated_base_ini
+        from src.utils.dataforge_diff import update_manifest
+        from src.utils.settings import AppSettings
+
+        base = tmp_path / "base.ini"
+        base.write_text("key=value\n", encoding="utf-8")
+        _record_generated_base_ini(base, tmp_path, {"ship_descs"})
+        libs = tmp_path / "forge/raw/libs"
+        libs.mkdir(parents=True)
+        update_manifest(libs)
+        (tmp_path / AppSettings.ENHANCEMENTS_FILES["ship_descs"]).write_text("key=current\n", encoding="utf-8")
+        generate = MagicMock()
+        monkeypatch.setattr(AppSettings, "get_cache_dir", lambda: tmp_path)
+        monkeypatch.setattr(AppSettings, "get_dataforge_cache_dir", lambda: tmp_path / "forge")
+        monkeypatch.setattr(AppSettings, "get_enabled_enhancement_categories", lambda: {"ship_descs"})
+        monkeypatch.setattr("src.utils.pak_extractor.patch_set_fingerprint", lambda path: "patch")
+        monkeypatch.setattr("src.utils.pak_extractor.rebuild_patched_dataforge_cache", lambda *args: False)
+        monkeypatch.setattr(
+            "src.utils.dataforge_patcher.apply_patches",
+            lambda *args, **kwargs: SimpleNamespace(errors=[], summary_line=lambda: "patched"),
+        )
+        monkeypatch.setattr("importlib.util.module_from_spec", lambda spec: SimpleNamespace(main=generate))
+        monkeypatch.setattr(
+            "importlib.util.spec_from_file_location",
+            lambda *args: SimpleNamespace(loader=SimpleNamespace(exec_module=lambda mod: None)),
+        )
+        completed = []
+        worker = EnhancementsGeneratorWorker(categories={"ship_descs"})
+        worker.finished.connect(completed.append)
+        worker.run()
+        assert completed == [True]
+        generate.assert_not_called()
+
     def test_dirty_cache_does_not_override_empty_category_selection(self, monkeypatch, tmp_path):
         from src.gui.workers import EnhancementsGeneratorWorker, _record_generated_base_ini
         from src.utils.settings import AppSettings

@@ -110,7 +110,8 @@ class AnimatedProgressDialog(QProgressDialog):
             self._bar.setTextVisible(False)
         self.show()
 
-    def setLabelText(self, message: str) -> None:
+    def setLabelText(self, message: str | None) -> None:
+        message = message or ""
         display = message if len(message) <= _PROGRESS_MESSAGE_LIMIT else message[: _PROGRESS_MESSAGE_LIMIT - 3] + "..."
         self._message_label.setToolTip(message if display != message else "")
         super().setLabelText(display)
@@ -347,7 +348,11 @@ class EnhancementsGeneratorWorker(QThread):
             # case where a partial prior run generated only some categories
             # (leaving the others absent).
             if diff is not None:
-                missing = [name for name in AppSettings.ENHANCEMENTS_FILES.values() if not (cache_dir / name).exists()]
+                missing = [
+                    name
+                    for key, name in AppSettings.ENHANCEMENTS_FILES.items()
+                    if key in selected and not (cache_dir / name).exists()
+                ]
                 if missing:
                     sample = ", ".join(missing[:3])
                     ellipsis = "…" if len(missing) > 3 else ""

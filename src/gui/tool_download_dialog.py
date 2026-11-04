@@ -99,12 +99,17 @@ class ToolDownloadDialog(QDialog):
         self._worker.start()
 
     def _on_cancel(self) -> None:
-        self._cancel_btn.setEnabled(False)
-        self._status_label.setText("Cancelling…")
-        self._worker.finished.disconnect(self._on_finished)
-        self._worker.cancel()
-        self._worker.wait()
         self.reject()
+
+    def reject(self) -> None:
+        # Esc and the close button also land here; wait for the worker via _on_finished instead of blocking.
+        if self._worker.isRunning():
+            if self._cancel_btn.isEnabled():
+                self._cancel_btn.setEnabled(False)
+                self._status_label.setText("Cancelling…")
+                self._worker.cancel()
+            return
+        super().reject()
 
     def _on_finished(self, success: bool) -> None:
         self._worker.wait()
