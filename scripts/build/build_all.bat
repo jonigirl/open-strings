@@ -22,20 +22,25 @@ if /I "%1"=="--sign" (
     uv run python scripts\build\build_exe.py --self-sign
 )
 if errorlevel 1 (
-    echo ERROR: Failed to build executable
-    pause
-    exit /b 1
+    set "FAIL_MSG=Failed to build executable"
+    goto :fail
 )
 echo   - Executable created
 echo.
 
 echo Step 3: Verifying onedir build...
-if exist "dist\OpenStrings\" (
-    echo   - Build folder exists: OK
-) else (
-    echo   - ERROR: Build folder not found at dist\OpenStrings\
-    pause
-    exit /b 1
+if not exist "dist\OpenStrings\" (
+    set "FAIL_MSG=Build folder not found at dist\OpenStrings\"
+    goto :fail
+)
+echo   - Build folder exists: OK
+if /I "%1"=="--sign" (
+    pwsh -NoProfile -NonInteractive -Command "if ((Get-AuthenticodeSignature -LiteralPath 'dist\OpenStrings\OpenStrings.exe').Status -ne 'Valid') { exit 1 }"
+    if errorlevel 1 (
+        set "FAIL_MSG=dist\OpenStrings\OpenStrings.exe signature is not valid"
+        goto :fail
+    )
+    echo   - Executable signature: Valid
 )
 echo.
 
@@ -52,16 +57,25 @@ if "%ISCC%"=="" (
 ) else (
     "%ISCC%" installer.iss
     if errorlevel 1 (
-        echo WARNING: Installer creation failed
-        echo You can create it manually with Inno Setup
-    ) else (
-        echo   - Installer created successfully!
-        if /I "%1"=="--sign" (
-            echo.
-            echo Step 4b: Signing installer...
-            for %%f in (dist\OpenStrings-*-Setup.exe) do (
-                uv run python scripts\build\build_exe.py --sign-file "%%f"
+        set "FAIL_MSG=Installer creation failed"
+        goto :fail
+    )
+    echo   - Installer created successfully!
+    if /I "%1"=="--sign" (
+        echo.
+        echo Step 4b: Signing installer...
+        for %%f in (dist\OpenStrings-*-Setup.exe) do (
+            uv run python scripts\build\build_exe.py --sign-file "%%f"
+            if errorlevel 1 (
+                set "FAIL_MSG=Installer signing failed: %%f"
+                goto :fail
             )
+            pwsh -NoProfile -NonInteractive -Command "if ((Get-AuthenticodeSignature -LiteralPath '%%f').Status -ne 'Valid') { exit 1 }"
+            if errorlevel 1 (
+                set "FAIL_MSG=Installer signature is not valid: %%f"
+                goto :fail
+            )
+            echo   - Installer signature: Valid
         )
     )
 )
@@ -81,3 +95,10 @@ echo   1. Test the installer: dist\OpenStrings-*-Setup.exe
 echo   2. Distribute the installer.
 echo.
 pause
+exit /b 0
+
+:: Exits inside ( ) blocks can return 0 when the script is run via cmd /c, so all failures jump here.
+:fail
+echo ERROR: !FAIL_MSG!
+pause
+exit /b 1
