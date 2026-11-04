@@ -96,24 +96,27 @@ uv run pytest tests/ --tb=short
 
 ## Manual Testing Workflow
 
-### Local 1.5.2 Build Smoke Test
+### Local 1.5.3 Build Smoke Test
 
 1. Launch `dist/OpenStrings/OpenStrings.exe` or install
-   `dist/OpenStrings-1.5.2-Setup.exe`; confirm version 1.5.2 and a valid digital signature.
+   `dist/OpenStrings-1.5.3-Setup.exe`; confirm version 1.5.3 and a valid digital signature.
 2. Open the Log tab and pop it out before starting generation. Select PTU in Config,
    confirm the installed game path, and run Generate Enhancements. The first run
-   with the new tools rebuilds the cache; allow several minutes for export and
-   integrity validation. Verify progress continues and the log remains visible.
+   after updating regenerates enhancements; allow several minutes. Verify progress
+   continues and the log remains visible.
 3. Confirm successful integrity validation and generation, then return the log to
    its tab. Check that earlier entries remain and appear only once.
-4. Exercise Category, Favourite, and Status column dropdowns and each text-match
-   mode. Combine filters, sort a header, resize columns, and clear all filters.
-5. Check a ship description, temporary blueprint mission access, and a vehicle
+4. Enable **Armor & Suits** and confirm an armor or helmet description shows
+   signature lines. Fractional reductions keep one decimal place.
+5. Check an FPS weapon with several fire modes (for example a rifle with auto and
+   semi-auto). Differing rates are listed per mode.
+6. Check a ship description, temporary blueprint mission access, and a vehicle
    rental description. Temporary access must not be labelled as permanent blueprint
    ownership; rentals must include their duration.
-6. Disable and re-enable an enhancement category, then regenerate. Confirm current
-   output returns, saved overrides remain intact, and a clean subsequent generation
-   reports that enhancements are already up to date.
+7. Disable a category and regenerate. Confirm it does not force a full rebuild,
+   then re-enable it and confirm current output returns with saved overrides intact.
+8. Start a tool download from Config and press Esc or Cancel. The dialog shows
+   "Cancelling…" and closes once the download stops.
 
 Repeat the generation checks on LIVE separately. Each channel has its own cache
 and requires its own first-run rebuild. Do not apply to the game during initial
@@ -196,7 +199,7 @@ Coverage is measured automatically on every test run. GUI modules have Qt-based 
 | -------------------------- | ---------------------------- |
 | Full suite                 | `uv run pytest` passes       |
 | Coverage floor             | 83% (`--cov-fail-under=83`)  |
-| Current development result | 1,244 tests, 87.23% coverage |
+| Current development result | 1,261 tests, 88.10% coverage |
 
 The exact percentage naturally changes as code and tests evolve; rely on the full
 suite result rather than treating the development snapshot as a release requirement.

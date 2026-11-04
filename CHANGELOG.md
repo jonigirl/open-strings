@@ -10,6 +10,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - An Armor & Suits enhancement category with FPS armor and suit signature data.
+- Weapons whose fire modes have different rates list the rate for each mode.
+
+### Fixed
+
+- Armor pieces that share one description but have different signature stats no
+  longer show stats from an arbitrary piece; the description is left unchanged.
+- Magazine and battery sizes in item descriptions are no longer mistaken for
+  component size tags.
+- Fractional armor reductions keep one decimal place instead of being rounded.
+- Ships without a known length no longer show "Length: 0".
+- Mission reward lists keep a stable order between generations.
+- Disabled enhancement categories no longer force a full regeneration.
+- Cancelling a tool download with Esc now waits for the download to stop.
+- Build script failures return a non-zero exit code, and signed builds verify
+  both signatures.
+- Type checking passes across the application source.
+
+### Changed
+
+- Generation runs once after updating so existing enhancements pick up these fixes.
+- Correction to the 1.4.0 and 1.4.1 entries: the `EnhancementPipeline` class is
+  incomplete and not used for generation, and mypy did not pass on the application
+  source until this release. Strict mode is not enabled.
 
 ## [1.5.2] - 2026-10-09
 

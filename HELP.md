@@ -103,6 +103,11 @@ When Star Citizen updates, your edits are preserved in `<data folder>\<channel>\
 - Click **Generate Enhancements** to extract DataForge data from `Data.p4k` and rebuild the enhancement INI files. Declarative patches under `patches/` are re-applied idempotently on every regen so known CIG data bugs stay fixed without waiting for a game patch.
 - Mission descriptions distinguish temporary blueprint access from permanent
   blueprint rewards, and show successful vehicle rentals with their duration.
+- **Armor & Suits** adds signature data (emission and reductions) to FPS armor and
+  helmet descriptions. It is separate from the **Gear** string category. When pieces
+  share one description but have different stats, that description is left unchanged.
+- Weapons with fire modes at different rates list each rate, for example
+  `Fire Rate: Auto 375 / Semi-Auto 300 RPM`.
 - DataForge export output appears live in the Log tab. An export may run for up
   to two hours overall; it stops after 30 minutes without output. Timeout messages
   distinguish these limits and include the latest diagnostics. No incomplete

@@ -14,7 +14,7 @@ Open Strings is a fork of [Smart Citizen by Osiris DevWorks](https://github.com/
 - **Column filters** — filter Category, Favourite, and Status values, and match text using Contains, Exact, Starts with, or Excludes.
 - **Detachable log viewer** — monitor extraction and generation in a separate non-modal window without losing the log buffer.
 - **Launcher menu heading** — rename the heading shown in the Star Citizen launcher; optionally show the Open Strings version suffix.
-- **Auto-generated enhancements** — stat overlays for ships, components, weapons, missions, journal entries, and commodity crafting; togglable per category.
+- **Auto-generated enhancements** — stat overlays for ships, components, weapons, armor and suits, missions, journal entries, and commodity crafting; togglable per category.
 - **Safe apply** — timestamped backups before every write, automatic rollback on validation mismatch, up to 5 backups per channel.
 
 ## Data And Cache
@@ -28,10 +28,9 @@ DataForge uses a protected two-layer cache: a pristine extraction and a patched 
 copy. Game or extraction-tool updates rebuild both layers; an Open Strings patch update
 rebuilds only the working copy before regenerating enhancements.
 
-Version 1.5.2 uses a pinned patched unforge exporter that preserves records sharing a
+Open Strings uses a pinned patched unforge exporter that preserves records sharing a
 source path and repairs invalid XML record names. A completion manifest is checked
-against the DCB record index before a new cache becomes live. Updating from an older
-exporter requires one extraction per channel; saved overrides are preserved.
+against the DCB record index before a new cache becomes live.
 
 Initial extraction can take 30 minutes or longer. The Log tab shows live exporter
 progress, and cache health checks show their own record counts. Exports stop after
@@ -87,4 +86,4 @@ Games or Roberts Space Industries.
 ## Licence
 
 GPL-3.0-only. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md). The patched tool
-package includes the project GPL license and the original upstream MIT notice.
+package includes the project GPL license and the original unp4k MIT notice.
