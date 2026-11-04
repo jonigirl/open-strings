@@ -54,6 +54,10 @@ def _fire_modes(root: ET.Element, loc: dict[str, str] | None = None) -> list[str
     return []
 
 
+def _fire_rates_by_mode(root: ET.Element, loc: dict[str, str] | None = None) -> list[tuple[str, float]]:
+    return []
+
+
 def _loadout_summary(root: ET.Element) -> tuple[str, str]:
     return ("", "")
 
@@ -628,7 +632,12 @@ def enhancements_weapon(
     if weight is not None and weight > 0:
         lines.append(f"Weight: {weight:.1f} kg")
     if fr:
-        lines.append(f"Fire Rate: {_fmt(fr, ' RPM')}")
+        mode_rates = _fire_rates_by_mode(root, loc)
+        if len({round(rate) for _, rate in mode_rates}) > 1:
+            per_mode = " / ".join(f"{label} {_fmt(rate)}".strip() for label, rate in mode_rates)
+            lines.append(f"Fire Rate: {per_mode} RPM")
+        else:
+            lines.append(f"Fire Rate: {_fmt(fr, ' RPM')}")
     if modes:
         lines.append(f"Fire Modes: {' / '.join(modes)}")
 
@@ -713,6 +722,8 @@ def enhancements_ship_dataforge(
 
     bbox = vpc.find("maxBoundingBoxSize")
     length = bbox.get("y") if bbox is not None else None
+    if length is not None and float(length) <= 0:
+        length = None
 
     ins = _find(root, "shipInsuranceParams")
     ins_base = ins.get("baseWaitTimeMinutes") if ins is not None else None
@@ -797,7 +808,8 @@ def enhancements_fps_armor(root: ET.Element) -> str:
         ):
             value = signature.get(attribute)
             if value is not None:
-                signature_parts.append(f"{label}: {_fmt(value)}")
+                decimals = 0 if float(value).is_integer() else 1
+                signature_parts.append(f"{label}: {_fmt(value, '', decimals)}")
         if signature_parts:
             label = f"{signature_type} Signature" if signature_type else "Signature"
             lines.append(f"{label}: " + "  |  ".join(signature_parts))

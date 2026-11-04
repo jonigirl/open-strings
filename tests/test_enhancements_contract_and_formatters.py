@@ -176,6 +176,32 @@ def test_fps_armor_formatter_outputs_signature_stats(gen_module):
     assert "Radiation:" not in out
 
 
+def _armor_xml(path: Path, key: str, emission: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f'<EntityClassDefinition.Example><Localization Description="@{key}"/>'
+        f'<ItemSuitArmorSignatureParams signatureType="Electromagnetic" signatureEmission="{emission}"/>'
+        "</EntityClassDefinition.Example>",
+        encoding="utf-8",
+    )
+
+
+def test_armor_scan_omits_shared_keys_with_conflicting_signatures(gen_module, tmp_path):
+    armor_dir = tmp_path / "armor"
+    helmet_dir = tmp_path / "helmet"
+    _armor_xml(armor_dir / "arms.xml", "conflict_desc", "20")
+    _armor_xml(helmet_dir / "helmet.xml", "conflict_desc", "2")
+    _armor_xml(armor_dir / "core.xml", "agreed_desc", "30")
+    _armor_xml(armor_dir / "core_variant.xml", "agreed_desc", "30")
+    loc = {"conflict_desc": "Shared set", "agreed_desc": "Core"}
+
+    out = gen_module.scan_armor_dirs((armor_dir, helmet_dir), loc)
+
+    assert "conflict_desc" not in out
+    assert out["agreed_desc"].startswith("Core")
+    assert "Electromagnetic Signature: Emission: 30" in out["agreed_desc"]
+
+
 def test_ship_fuel_formatter_outputs_intake_and_capacity(gen_module):
     root = _xml(
         """
@@ -543,6 +569,54 @@ def test_ship_dataforge_formatter_outputs_flight_and_insurance(gen_module):
     assert "Role:" in out
     assert "Armor HP:" in out
     assert "Insurance:" in out
+
+
+def test_ship_dataforge_formatter_omits_zero_length(gen_module):
+    ship_root = _xml(
+        """
+        <Entity>
+          <VehicleComponentParams crewSize="4"><maxBoundingBoxSize x="0" y="0" z="0" /></VehicleComponentParams>
+        </Entity>
+        """
+    )
+    out = gen_module.enhancements_ship_dataforge(ship_root, None, {}, {})
+    assert "Crew: 4" in out
+    assert "Length:" not in out
+
+
+def _fire_weapon(rapid: str, single: str) -> ET.Element:
+    return _xml(
+        f"""
+        <Entity>
+          <SWeaponActionFireRapidParams name="Rapid" fireRate="{rapid}" />
+          <SWeaponActionFireSingleParams name="Single" fireRate="{single}" />
+        </Entity>
+        """
+    )
+
+
+def test_weapon_formatter_lists_fire_rate_per_mode(gen_module):
+    out = gen_module.enhancements_weapon(_fire_weapon("375", "300"), {}, {}, None)
+    assert "Fire Rate: Auto 375 / Semi-Auto 300 RPM" in out
+
+
+def test_weapon_formatter_single_fire_rate_when_modes_match(gen_module):
+    out = gen_module.enhancements_weapon(_fire_weapon("375", "375"), {}, {}, None)
+    assert "Fire Rate: 375 RPM" in out
+
+
+def test_fps_armor_formatter_keeps_fractional_precision(gen_module):
+    root = _xml(
+        """
+        <Entity>
+          <ItemSuitArmorSignatureParams signatureType="Infrared" signatureEmission="0"
+            signatureReductionWeighted="46.6" signatureReductionAbsolute="0" />
+        </Entity>
+        """
+    )
+    out = gen_module.enhancements_fps_armor(root)
+    assert "Weighted Reduction: 46.6" in out
+    assert "Emission: 0 " in out
 
 
 @pytest.mark.parametrize("primary", [False, True])

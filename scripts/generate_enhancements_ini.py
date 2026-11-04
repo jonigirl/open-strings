@@ -28,7 +28,7 @@ import shutil
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -216,10 +216,12 @@ def write_output_batch(output_dir: Path, files: dict[str, str]) -> None:
 #     so downstream rendering can derive rank-tier labels (Rank 0–1,
 #     Rank 2–3, Rank 4) from the pool filename. v7 pickles unpack as
 #     a bare dict and would crash the new 2-tuple consumer.
+#   scitem_lookups v7 / blueprint_pools v10 / component_tag_fallbacks v3 (1.5.3)
+#     — Size: must start a line, so FPS "Battery Size: 30" no longer tags.
 _LOOKUP_VERSIONS: dict[str, str] = {
-    "blueprint_pools": "v9",
-    "scitem_lookups": "v6",
-    "component_tag_fallbacks": "v2",
+    "blueprint_pools": "v10",
+    "scitem_lookups": "v7",
+    "component_tag_fallbacks": "v3",
 }
 
 
@@ -534,7 +536,7 @@ def _component_name_tag(
     minimum-information bar isn't met.
     """
     # Strict path — original behaviour unchanged.
-    size_m = re.search(r"Size:\s*(\d+)", desc_value)
+    size_m = re.search(r"(?:^|\\n|\n)Size:\s*(\d+)", desc_value)
     grade_m = re.search(r"Grade:\s*([A-D])", desc_value)
     class_m = re.search(r"Class:\s*(\w+)", desc_value)
     if size_m and grade_m and class_m:
@@ -548,7 +550,7 @@ def _component_name_tag(
 
     # Fallback path — mining heads / lasers write "Size: S0" / "Size: S00";
     # accept an optional leading 'S' on the digit.
-    size_fb = re.search(r"Size:\s*S?(\d+)", desc_value)
+    size_fb = re.search(r"(?:^|\\n|\n)Size:\s*S?(\d+)", desc_value)
     if not size_fb:
         return None
     size_str = size_fb.group(1)
@@ -713,28 +715,46 @@ _FIRE_MODE_LABELS = {
 }
 
 
+def _fire_mode_label(el: ET.Element, loc: dict | None) -> str | None:
+    # Prefer a clean label from the raw name attribute
+    raw_name = (el.get("name") or "").strip()
+    label = _FIRE_MODE_LABELS.get(raw_name.lower())
+    if not label:
+        # Sentinel loc-keys (e.g. @LOC_PLACEHOLDER) render as literal ``<= PLACEHOLDER =>`` in-game.
+        loc_key = el.get("localisedName", "")
+        if _is_sentinel_loc_ref(loc_key):
+            return None
+        if loc_key.startswith("@") and loc is not None:
+            label = (loc.get(loc_key[1:]) or raw_name or "").strip("[] ")
+        else:
+            label = raw_name or loc_key.strip("[] ")
+    if not label or _is_placeholder_text(label):
+        return None
+    return label
+
+
 def _fire_modes(root: ET.Element, loc: dict | None = None) -> list[str]:
     names = []
     for el in root.iter():
         if "WeaponActionFire" in el.tag:
-            # Prefer a clean label from the raw name attribute
-            raw_name = (el.get("name") or "").strip()
-            label = _FIRE_MODE_LABELS.get(raw_name.lower())
-            if not label:
-                # Try localized name, stripping brackets. Skip CIG sentinel
-                # loc-keys (e.g. @LOC_PLACEHOLDER) — they resolve to literal
-                # ``<= PLACEHOLDER =>`` strings that should not surface in
-                # the in-game stats list.
-                loc_key = el.get("localisedName", "")
-                if _is_sentinel_loc_ref(loc_key):
-                    continue
-                if loc_key.startswith("@") and loc is not None:
-                    label = (loc.get(loc_key[1:]) or raw_name or "").strip("[] ")
-                else:
-                    label = raw_name or loc_key.strip("[] ")
-            if label and not _is_placeholder_text(label) and label not in names:
+            label = _fire_mode_label(el, loc)
+            if label and label not in names:
                 names.append(label)
     return names
+
+
+def _fire_rates_by_mode(root: ET.Element, loc: dict | None = None) -> list[tuple[str, float]]:
+    rates: list[tuple[str, float]] = []
+    for el in root.iter():
+        if "WeaponActionFire" not in el.tag:
+            continue
+        try:
+            rate = float(el.get("fireRate") or 0)
+        except ValueError:
+            continue
+        if rate > 0:
+            rates.append((_fire_mode_label(el, loc) or "", rate))
+    return rates
 
 
 _DAMAGE_TYPES = (
@@ -1957,6 +1977,7 @@ _enh_formatters._extract_spawn_counts = _extract_spawn_counts
 _enh_formatters._extract_turret_info = _extract_turret_info
 _enh_formatters._fire_rate = _fire_rate
 _enh_formatters._fire_modes = _fire_modes
+_enh_formatters._fire_rates_by_mode = _fire_rates_by_mode
 _enh_formatters._poly_type = _poly_type
 
 enhancements_fps_attachment = _enh_formatters.enhancements_fps_attachment
@@ -2502,6 +2523,35 @@ def scan_entity_dir(
     return out
 
 
+def scan_armor_dirs(armor_dirs: Iterable[Path], loc: dict[str, str]) -> dict[str, str]:
+    """Return armor signature enhancements, omitting shared descriptions whose pieces disagree."""
+    blocks_by_key: dict[str, set[str]] = {}
+    for armor_dir in armor_dirs:
+        if not armor_dir.exists():
+            continue
+        for xml_file in armor_dir.rglob("*.xml"):
+            try:
+                root = ET.parse(xml_file).getroot()
+            except ET.ParseError:
+                continue
+            key = _loc_key(root)
+            if key and key in loc:
+                blocks_by_key.setdefault(key, set()).add(enhancements_fps_armor(root))
+
+    out: dict[str, str] = {}
+    ambiguous: list[str] = []
+    for key, blocks in blocks_by_key.items():
+        if len(blocks) > 1:
+            ambiguous.append(key)
+            continue
+        block = next(iter(blocks))
+        if block:
+            out[key] = append_enhancements(loc[key], block)
+    if ambiguous:
+        logger.info(f"FPS armor: omitted {len(ambiguous)} shared descriptions with conflicting signatures")
+    return out
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 
@@ -2934,14 +2984,8 @@ def main(
         return out
 
     def _gen_fps_armor() -> dict[str, str]:
-        out: dict[str, str] = {}
-        armor_dirs = (
-            records / "entities" / "scitem" / "characters" / "human" / "armor",
-            records / "entities" / "scitem" / "characters" / "human" / "starwear" / "helmet",
-        )
-        for armor_dir in armor_dirs:
-            if armor_dir.exists():
-                out.update(scan_entity_dir(armor_dir, enhancements_fps_armor, loc=loc))
+        human_dir = records / "entities" / "scitem" / "characters" / "human"
+        out = scan_armor_dirs((human_dir / "armor", human_dir / "starwear" / "helmet"), loc)
         logger.info(f"Finished FPS armor ({len(out)} entries)")
         _tick("Generated FPS armor descriptions")
         return out
@@ -3276,7 +3320,7 @@ def main(
                     bp_body_parts: list[str] = []
                     if len(unique_fps) == 1:
                         # One effective pool — render flat unless there's a rank label.
-                        items = list(next(iter(unique_fps)))
+                        items = sorted(next(iter(unique_fps)))
                         only_keys = next(iter(unique_fps.values()))
                         only_labels = sorted({lbl for _, lbl in only_keys if lbl})
                         if only_labels:
@@ -3295,7 +3339,7 @@ def main(
                             labels = sorted({lbl for _, lbl in region_keys if lbl})
                             sys_str = ", ".join(systems)
                             header = f"{sys_str}, {', '.join(labels)}" if labels else sys_str
-                            region_list = "\\n".join(f"- {name}" for name in fp)
+                            region_list = "\\n".join(f"- {name}" for name in sorted(fp))
                             bp_body_parts.append(f"<EM4>[{header}]</EM4>\\n{region_list}")
                     sections.append("<EM3>POTENTIAL BLUEPRINTS</EM3>\\n" + "\\n\\n".join(bp_body_parts))
 

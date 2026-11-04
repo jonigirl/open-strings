@@ -497,6 +497,15 @@ class TestBlueprintNameTags:
         tag = gen_module._component_name_tag(desc)
         assert tag is None
 
+    @pytest.mark.parametrize("field", ["Battery Size", "Magazine Size", "Canister Size"])
+    def test_tagger_ignores_capacity_sizes(self, gen_module, field):
+        desc = f"Item Type: Rifle\\nClass: Electron\\n\\n{field}: 30"
+        assert gen_module._component_name_tag(desc) is None
+
+    def test_tagger_matches_escaped_line_breaks(self, gen_module):
+        desc = "Item Type: Shield Generator\\nSize: 1\\nGrade: A\\nClass: Military"
+        assert gen_module._component_name_tag(desc) == "[MIL-S1-A]"
+
     def test_strip_cig_size_prefix_helper(self, gen_module):
         assert gen_module._strip_cig_size_prefix("S0 Helix") == "Helix"
         assert gen_module._strip_cig_size_prefix("S12 Rockhound") == "Rockhound"
