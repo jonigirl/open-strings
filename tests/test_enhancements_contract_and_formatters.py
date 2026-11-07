@@ -153,6 +153,53 @@ def test_fps_attachment_formatter_outputs_weapon_mod_line(gen_module):
     assert "Component HP:" in out
 
 
+def test_fps_attachment_formatter_summarizes_equal_spread_modifiers(gen_module):
+    root = _xml(
+        """
+        <Entity>
+          <SWeaponModifierComponentParams>
+            <weaponStats>
+              <spreadModifier minMultiplier="0.885" maxMultiplier="0.885"
+                firstAttackMultiplier="0.885" attackMultiplier="0.885" />
+            </weaponStats>
+          </SWeaponModifierComponentParams>
+        </Entity>
+        """
+    )
+
+    out = gen_module.enhancements_fps_attachment(root)
+
+    assert "Spread: x0.885 (-11.5%)" in out
+    assert "Min:" not in out
+
+
+def test_fps_attachment_formatter_outputs_linked_flashlight_stats(gen_module):
+    root = _xml(
+        """
+        <Entity>
+          <SItemPortLoadoutEntryParams itemPortName="light_1"
+            entityClassName="weapon_underbarrel_light_narrow_blue_01" />
+          <SItemPortLoadoutEntryParams itemPortName="light_2"
+            entityClassName="weapon_underbarrel_light_wide_blue_01" />
+        </Entity>
+        """
+    )
+    lights = {
+        "weapon_underbarrel_light_narrow_blue_01": _xml(
+            '<Entity><sizeParams lightRadius="35" />'
+            '<defaultState intensity="3"><color r="0.2" g="0.8" b="0.9" /></defaultState></Entity>'
+        ),
+        "weapon_underbarrel_light_wide_blue_01": _xml(
+            '<Entity><sizeParams lightRadius="50" /><defaultState intensity="0.5" /></Entity>'
+        ),
+    }
+
+    out = gen_module.enhancements_fps_attachment(root, lights)
+
+    assert "Narrow Beam: Radius: 35 m  |  Intensity: 3  |  Colour: Blue" in out
+    assert "Wide Beam: Radius: 50 m  |  Intensity: 0.5  |  Colour: Blue" in out
+
+
 def test_fps_armor_formatter_outputs_signature_stats(gen_module):
     root = _xml(
         """

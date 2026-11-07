@@ -817,14 +817,9 @@ def enhancements_fps_armor(root: ET.Element) -> str:
     return "\\n".join(lines)
 
 
-def enhancements_fps_attachment(root: ET.Element) -> str:
+def enhancements_fps_attachment(root: ET.Element, light_lookup: dict[str, ET.Element] | None = None) -> str:
     wm = _find(root, "SWeaponModifierComponentParams")
-    if wm is None:
-        return ""
-
-    ws = wm.find(".//weaponStats")
-    if ws is None:
-        return ""
+    ws = wm.find(".//weaponStats") if wm is not None else None
 
     def _f(el: ET.Element | None, attr: str) -> float | None:
         if el is None:
@@ -842,70 +837,122 @@ def enhancements_fps_attachment(root: ET.Element) -> str:
 
     lines: list[str] = []
 
-    mod_parts = []
-    for attr, label in (
-        ("damageMultiplier", "Damage"),
-        ("fireRateMultiplier", "Fire Rate"),
-        ("projectileSpeedMultiplier", "Projectile"),
-        ("chargeTimeMultiplier", "Charge Time"),
-        ("ammoCostMultiplier", "Ammo Cost"),
-        ("heatGenerationMultiplier", "Heat"),
-        ("soundRadiusMultiplier", "Sound"),
-    ):
-        v = _f(ws, attr)
-        if _nz(v):
-            mod_parts.append(f"{label}: x{v:.3g}")
-    if mod_parts:
-        lines.append("Weapon Mod: " + "  |  ".join(mod_parts))
-
-    spread = ws.find("spreadModifier")
-    if spread is not None:
-        spread_parts = []
+    if ws is not None:
+        mod_parts = []
         for attr, label in (
-            ("minMultiplier", "Min"),
-            ("maxMultiplier", "Max"),
-            ("firstAttackMultiplier", "First"),
-            ("attackMultiplier", "Attack"),
-            ("decayMultiplier", "Decay"),
+            ("damageMultiplier", "Damage"),
+            ("fireRateMultiplier", "Fire Rate"),
+            ("projectileSpeedMultiplier", "Projectile"),
+            ("chargeTimeMultiplier", "Charge Time"),
+            ("ammoCostMultiplier", "Ammo Cost"),
+            ("heatGenerationMultiplier", "Heat"),
+            ("soundRadiusMultiplier", "Sound"),
         ):
-            v = _f(spread, attr)
+            v = _f(ws, attr)
             if _nz(v):
-                spread_parts.append(f"{label}: x{v:.3g}")
-        additive = _f(spread, "additiveModifier")
-        if additive is not None and abs(additive) > 1e-6:
-            spread_parts.append(f"Add: {additive:+.3g}")
-        if spread_parts:
-            lines.append("Spread: " + "  |  ".join(spread_parts))
+                mod_parts.append(f"{label}: x{v:.3g}")
+        if mod_parts:
+            lines.append("Weapon Mod: " + "  |  ".join(mod_parts))
 
-    aim = ws.find("aimModifier")
-    if aim is not None:
-        aim_parts = []
-        zoom = _f(aim, "zoomScale")
-        second_zoom = _f(aim, "secondZoomScale")
-        zoom_time = _f(aim, "zoomTimeScale")
-        if _nz(zoom):
-            aim_parts.append(f"Zoom: x{zoom:.3g}")
-        if _nz(second_zoom):
-            aim_parts.append(f"Alt Zoom: x{second_zoom:.3g}")
-        if _nz(zoom_time):
-            aim_parts.append(f"ADS Time: x{zoom_time:.3g}")
-        if aim_parts:
-            lines.append("Aiming: " + "  |  ".join(aim_parts))
+        spread = ws.find("spreadModifier")
+        if spread is not None:
+            spread_parts = []
+            core_modifiers = [
+                (attr, label, _f(spread, attr))
+                for attr, label in (
+                    ("minMultiplier", "Min"),
+                    ("maxMultiplier", "Max"),
+                    ("firstAttackMultiplier", "First"),
+                    ("attackMultiplier", "Attack"),
+                )
+            ]
+            core_values = [value for _, _, value in core_modifiers]
+            defined_core_values = [value for value in core_values if value is not None]
+            if (
+                len(defined_core_values) == len(core_values)
+                and max(defined_core_values) - min(defined_core_values) <= 1e-6
+            ):
+                multiplier = defined_core_values[0]
+                if _nz(multiplier):
+                    change_pct = (multiplier - 1) * 100
+                    spread_parts.append(f"x{multiplier:.3g} ({change_pct:+.1f}%)")
+            else:
+                for _, label, value in core_modifiers:
+                    if _nz(value):
+                        spread_parts.append(f"{label}: x{value:.3g}")
 
-    recoil = ws.find("recoilModifier")
-    if recoil is not None:
-        recoil_parts = []
-        for attr, label in (
-            ("fireRecoilStrengthMultiplier", "Strength"),
-            ("angleRecoilStrengthMultiplier", "Angle"),
-            ("randomnessMultiplier", "Randomness"),
-            ("decayMultiplier", "Decay"),
-        ):
-            v = _f(recoil, attr)
-            if _nz(v):
-                recoil_parts.append(f"{label}: x{v:.3g}")
-        if recoil_parts:
-            lines.append("Recoil: " + "  |  ".join(recoil_parts))
+            decay = _f(spread, "decayMultiplier")
+            if _nz(decay):
+                spread_parts.append(f"Decay: x{decay:.3g}")
+            additive = _f(spread, "additiveModifier")
+            if additive is not None and abs(additive) > 1e-6:
+                spread_parts.append(f"Add: {additive:+.3g}")
+            if spread_parts:
+                lines.append("Spread: " + "  |  ".join(spread_parts))
+
+        aim = ws.find("aimModifier")
+        if aim is not None:
+            aim_parts = []
+            zoom = _f(aim, "zoomScale")
+            second_zoom = _f(aim, "secondZoomScale")
+            zoom_time = _f(aim, "zoomTimeScale")
+            if _nz(zoom):
+                aim_parts.append(f"Zoom: x{zoom:.3g}")
+            if _nz(second_zoom):
+                aim_parts.append(f"Alt Zoom: x{second_zoom:.3g}")
+            if _nz(zoom_time):
+                aim_parts.append(f"ADS Time: x{zoom_time:.3g}")
+            if aim_parts:
+                lines.append("Aiming: " + "  |  ".join(aim_parts))
+
+        recoil = ws.find("recoilModifier")
+        if recoil is not None:
+            recoil_parts = []
+            for attr, label in (
+                ("fireRecoilStrengthMultiplier", "Strength"),
+                ("angleRecoilStrengthMultiplier", "Angle"),
+                ("randomnessMultiplier", "Randomness"),
+                ("decayMultiplier", "Decay"),
+            ):
+                v = _f(recoil, attr)
+                if _nz(v):
+                    recoil_parts.append(f"{label}: x{v:.3g}")
+            if recoil_parts:
+                lines.append("Recoil: " + "  |  ".join(recoil_parts))
+
+    if light_lookup:
+        seen_lights: set[str] = set()
+        for port in root.iter("SItemPortLoadoutEntryParams"):
+            light_name = (port.get("entityClassName") or "").casefold()
+            light = light_lookup.get(light_name)
+            if light is None or light_name in seen_lights:
+                continue
+            seen_lights.add(light_name)
+
+            size = _find(light, "sizeParams")
+            state = _find(light, "defaultState")
+            beam = light_name.removeprefix("weapon_underbarrel_light_").split("_", 1)[0].title()
+            details = []
+            radius = size.get("lightRadius") if size is not None else None
+            intensity = _f(state, "intensity")
+            if radius is not None:
+                details.append(f"Radius: {_fmt(radius, ' m')}")
+            if intensity is not None:
+                decimals = 1 if not intensity.is_integer() else 0
+                details.append(f"Intensity: {_fmt(intensity, '', decimals)}")
+            light_suffix = light_name.removeprefix("weapon_underbarrel_light_")
+            color = next(
+                (
+                    name.title()
+                    for name in ("blue", "darkblue", "gold", "purple", "red")
+                    if f"_{name}_" in f"_{light_suffix}_"
+                ),
+                None,
+            )
+            if color:
+                details.append(f"Colour: {color}")
+            if details:
+                lines.append(f"{beam} Beam: " + "  |  ".join(details))
 
     comp_hp = _attr(root, "SHealthComponentParams", "Health")
     if comp_hp is not None:

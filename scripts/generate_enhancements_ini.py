@@ -3024,7 +3024,19 @@ def main(
         out: dict[str, str] = {}
         mod_dir = records / "entities" / "scitem" / "weapons" / "weapon_modifier"
         if mod_dir.exists():
-            out = scan_entity_dir(mod_dir, enhancements_fps_attachment, loc=loc)
+            light_lookup = {}
+            for light_file in mod_dir.glob("weapon_underbarrel_light_*.xml"):
+                try:
+                    light_root = ET.parse(light_file).getroot()
+                except ET.ParseError as exc:
+                    logger.warning(f"Skipping malformed light record {light_file.name}: {exc}")
+                    continue
+                light_lookup[_record_stem(light_root, light_file).casefold()] = light_root
+            out = scan_entity_dir(
+                mod_dir,
+                lambda root: enhancements_fps_attachment(root, light_lookup),
+                loc=loc,
+            )
         logger.info(f"Finished FPS attachments ({len(out)} entries)")
         _tick("Generated FPS attachment descriptions")
         return out

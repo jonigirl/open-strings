@@ -2,7 +2,7 @@
 
 from types import MappingProxyType
 
-ENHANCEMENTS_GENERATION_CONTRACT_VERSION = 2
+ENHANCEMENTS_GENERATION_CONTRACT_VERSION = 3
 
 # Paths relative to ``libs/foundry/records`` that the persistent cache retains.
 DATAFORGE_KEEP_SUBPATHS: tuple[str, ...] = (

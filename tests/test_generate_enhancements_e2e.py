@@ -9,7 +9,7 @@ import pytest
 pytestmark = pytest.mark.integration
 
 _SCRIPT_PATH = Path(__file__).parent.parent / "scripts" / "generate_enhancements_ini.py"
-_CATEGORIES = {"fps_armor_descs", "fps_weapon_descs"}
+_CATEGORIES = {"fps_armor_descs", "fps_weapon_descs", "fps_attachment_descs"}
 
 
 @pytest.fixture(scope="module")
@@ -50,10 +50,24 @@ def forge(tmp_path):
         '<SWeaponActionFireSingleParams name="Single" fireRate="300"/>'
         "</fireActions></EntityClassDefinition.Rifle>",
     )
+    modifier_dir = records / "entities" / "scitem" / "weapons" / "weapon_modifier"
+    _write(
+        modifier_dir / "klwe_ubarrel_flsh_s1.xml",
+        '<EntityClassDefinition.Flashlight><Localization Description="@flashlight_desc"/>'
+        '<SItemPortLoadoutEntryParams itemPortName="light_1" '
+        'entityClassName="weapon_underbarrel_light_narrow_blue_01"/>'
+        "</EntityClassDefinition.Flashlight>",
+    )
+    _write(
+        modifier_dir / "weapon_underbarrel_light_narrow_blue_01.xml",
+        "<EntityClassDefinition.weapon_underbarrel_light_narrow_blue_01>"
+        '<sizeParams lightRadius="35"/><defaultState intensity="3"/>'
+        "</EntityClassDefinition.weapon_underbarrel_light_narrow_blue_01>",
+    )
     base_ini = tmp_path / "out" / "base.ini"
     base_ini.parent.mkdir()
     base_ini.write_text(
-        "shared_set_desc=Shared set\ncore_desc=Core armor\nrifle_desc=Rifle\n",
+        "shared_set_desc=Shared set\ncore_desc=Core armor\nrifle_desc=Rifle\nflashlight_desc=Flashlight\n",
         encoding="utf-8",
     )
     return forge_dir, base_ini
@@ -75,10 +89,12 @@ def test_generator_main_writes_armor_and_weapon_outputs(gen_module, forge):
     outputs = _read_outputs(gen_module, base_ini.parent)
     armor = gen_module.parse_ini(base_ini.parent / gen_module.ENHANCEMENT_OUTPUT_FILES["fps_armor_descs"])
     weapons = gen_module.parse_ini(base_ini.parent / gen_module.ENHANCEMENT_OUTPUT_FILES["fps_weapon_descs"])
+    attachments = gen_module.parse_ini(base_ini.parent / gen_module.ENHANCEMENT_OUTPUT_FILES["fps_attachment_descs"])
 
     assert "shared_set_desc" not in armor
     assert "Weighted Reduction: 46.6" in armor["core_desc"]
     assert "Fire Rate: Auto 375 / Semi-Auto 300 RPM" in weapons["rifle_desc"]
+    assert "Narrow Beam: Radius: 35 m  |  Intensity: 3  |  Colour: Blue" in attachments["flashlight_desc"]
     assert all(text for text in outputs.values())
 
 
