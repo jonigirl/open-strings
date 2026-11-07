@@ -81,7 +81,7 @@ Click **Apply to Game** to write your edits to the game installation. A timestam
 
 ## 8. Restore a Backup
 
-Click **Restore Backup** to revert to a previous version. Open Strings keeps up to **5 automatic backups** — the oldest is pruned as new ones are created.
+Click **Restore Backup** to revert to a previous version. Restore is available after the active channel's `base.ini` is extracted. Only validated backups from that channel can be selected, and the current game file is backed up before replacement. Open Strings keeps up to **5 automatic backups** — the oldest is pruned as new ones are created.
 
 ## 9. Clear Localization
 
@@ -115,7 +115,7 @@ When Star Citizen updates, your edits are preserved in `<data folder>\<channel>\
 
 ## Config Tab
 
-- **Appearance** — pick the app theme (see below).
+- **Appearance** — pick the app theme and body font. Atkinson Hyperlegible is the default; Segoe UI and OpenDyslexic are also available. The selected font is used throughout the app, including the preview and Help panels.
 - **Star Citizen Installation** — path to your LIVE directory; auto-detected at install time, editable here.
 - **Open Strings Data** — folder for `user.ini`, base localization, enhancement INIs, and backups. Defaults to `Documents\Open Strings`. The larger DataForge cache is kept separately under `%LOCALAPPDATA%\Open Strings\<channel>\cache\dataforge`.
 - **Base Localization (P4K Extraction)** — click **Extract from Data.p4k** to unpack stock localization plus DataForge entity data directly from your installed game. This is the sole source for base strings and enhancement data.
@@ -125,6 +125,7 @@ When Star Citizen updates, your edits are preserved in `<data folder>\<channel>\
 
 - Real-time application log.
 - Filter by log level, auto-scroll to latest entries, and **Export** the log for troubleshooting or bug reports.
+- The log follows the selected app font and theme.
 - Click **Pop Out** to monitor the same log in a separate non-modal window while
   using the app. **Return to Tab**, or closing the window, restores the viewer
   without discarding entries.

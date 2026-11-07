@@ -33,12 +33,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Type checking passes across the application source.
 - Detailed extraction and generation progress no longer repeats in the
   Enhancements tab and status bar.
+- Switching channel or data folder no longer copies the previous channel's edits
+  into the new one.
+- Edits, including cleared overrides, are saved to user.ini as soon as they are
+  made, so a reload no longer brings a cleared value back.
+- Uninstalling with "My edits and backups" selected now removes only Open Strings
+  files from the data folder instead of the whole folder.
+- The downloaded unp4k package is verified against a pinned SHA-256 checksum
+  before extraction.
+- Restore Backup accepts only validated backups from the active channel and saves
+  the current game file before replacing it.
+- Clear Cache now targets the DataForge cache in LocalAppData.
+- Closing the app is deferred if a background worker does not stop in time.
+- Enhancement cache readiness is shown as text and is accessible without relying
+  on color alone.
+- The Segoe UI font option now applies correctly; Atkinson Hyperlegible is the
+  default body font at a readable size.
+- Help, About, and preview content follow the selected body font.
 
 ### Changed
 
 - Generation runs once after updating so existing enhancements pick up these fixes.
 - Windows CI tests both locked and lowest-compatible direct dependencies, and
   development dependency constraints require versions with known security fixes.
+- CI lints and format-checks the whole repository and type-checks the
+  enhancement generator.
+- Source reload and Apply-to-Game processing run in a worker instead of blocking
+  the UI thread.
+- The app stays open if a background worker does not stop within the close timeout.
 - Correction to the 1.4.0 and 1.4.1 entries: the `EnhancementPipeline` class is
   incomplete and not used for generation, and mypy did not pass on the application
   source until this release. Strict mode is not enabled.

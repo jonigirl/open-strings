@@ -111,7 +111,7 @@ uv run pytest tests/ --tb=short
 ### Local 1.5.3 Build Smoke Test
 
 1. Launch `dist/OpenStrings/OpenStrings.exe` or install
-   `dist/OpenStrings-1.5.3-Setup.exe`; confirm version 1.5.3 and a valid digital signature.
+   `dist/OpenStrings-1.5.3-Setup.exe`; confirm version 1.5.3. Local smoke builds may be unsigned or self-signed and are not release artifacts.
 2. Open the Log tab and pop it out before starting generation. Select PTU in Config,
    confirm the installed game path, and run Generate Enhancements. The first run
    after updating regenerates enhancements; allow several minutes. Verify progress
@@ -130,6 +130,9 @@ uv run pytest tests/ --tb=short
    then re-enable it and confirm current output returns with saved overrides intact.
 8. Start a tool download from Config and press Esc or Cancel. The dialog shows
    "Cancelling…" and closes once the download stops.
+9. Select each body font, including Segoe UI, and confirm the selection takes effect and persists after restart. Check the enhancements category states are readable as Ready, Missing, or Off without relying on color.
+10. Restore a backup from the active channel. Confirm the current `global.ini` is backed up first and an unrelated INI file cannot be selected as a backup.
+11. Resize the window and test at common Windows display-scaling settings. Confirm Config and Enhancements content remains reachable and text is legible.
 
 Repeat the generation checks on LIVE separately. Each channel has its own cache
 and requires its own first-run rebuild. Do not apply to the game during initial
@@ -484,9 +487,9 @@ To reproduce a CI failure locally:
 
 ```bash
 # Lint (what CI runs)
-uv run ruff check src/ tests/
-uv run ruff format --check src/ tests/
-uv run mypy src/
+uv run ruff check .
+uv run ruff format --check .
+uv run python -m mypy src/ scripts/generate_enhancements_ini.py
 
 # Tests (what CI runs)
 uv run pytest tests/ --cov=src --cov-report=xml
