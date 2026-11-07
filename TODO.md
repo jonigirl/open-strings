@@ -20,6 +20,7 @@ These are candidates for separate review and approval, not current release work.
   - [x] Give enhancement cache indicators a textual and accessible state instead of relying on color alone.
   - [x] Decide the progressive-disclosure split: Basic shows core search/edit/apply actions; Advanced adds filters and less-used tools.
   - [x] Make the Log tab respect the selected appearance preferences where appropriate.
+  - [x] Smoke-test packaged startup, Basic/Advanced toggles, persistence, and Basic search in an isolated profile.
   - [ ] Test the revised UI in the built app at common resolutions and Windows scaling levels.
 - [x] Make Clear Cache target the DataForge cache in LocalAppData.
 - [x] Restrict Restore Backup to validated active-channel backups and preserve the current game file.
