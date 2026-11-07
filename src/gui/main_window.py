@@ -2,9 +2,7 @@
 
 import logging
 import os
-import shutil
 import tempfile
-from collections import Counter
 from pathlib import Path
 
 from PyQt6.QtCore import QModelIndex, Qt, QTimer, QUrl, pyqtSlot
@@ -44,17 +42,15 @@ from src.gui.theme import BRAND_FONT_FAMILY, get_button_color, get_button_text_c
 from src.gui.workers import (
     AnimatedProgressDialog,
 )
-from src.merger.ini_merger import merge_sources_by_hierarchy
 from src.models.string_model import StringEntry
 from src.utils.applied_file_validator import validate_applied_file
-from src.utils.apply_engine import create_apply_backup, find_apply_base_file
+from src.utils.apply_engine import restore_apply_backup
 from src.utils.entry_filter import filter_entry_indices
 from src.utils.locpack_exporter import default_locpack_filename, write_locpack_zip
 from src.utils.perf import timed
-from src.utils.preview_renderer import _render_preview_html, _stamp_frontend_version
+from src.utils.preview_renderer import _render_preview_html
 from src.utils.resource import get_resource_path
 from src.utils.settings import AppSettings
-from src.utils.string_loader import load_source_files, load_sources_from_settings
 from src.utils.version import get_version
 
 logger = logging.getLogger(__name__)
@@ -106,6 +102,7 @@ class MainWindow(QMainWindow):
 
         # Data
         self.entries: list[StringEntry] = []
+        self._entries_user_ini_path: Path | None = None
         self.filtered_row_indices: list[int] = []  # noqa: F841  # kept for external compat
         self.default_values: dict[str, str] = {}  # Store default values from cached base source
 
@@ -136,11 +133,14 @@ class MainWindow(QMainWindow):
         self._ws = _ws
         self.setup_ui()
         self.restore_window_state()
+        self._model.dataChanged.connect(self._save_user_edits)
 
         # Wire coordinator signals to MainWindow result handlers.
         # Done after setup_ui() so enhancements_tab is available.
         self.worker_coord.loading_finished.connect(self._on_loading_finished)
         self.worker_coord.loading_error.connect(self._on_loading_error)
+        self.worker_coord.apply_finished.connect(self._on_apply_finished)
+        self.worker_coord.apply_error.connect(self._on_apply_error)
         self.worker_coord.p4k_finished.connect(self._on_p4k_extract_finished)
         self.worker_coord.dataforge_operation_running.connect(self.enhancements_tab.set_operation_running)
         self.worker_coord.dataforge_finished.connect(self._on_dataforge_extract_finished)
@@ -320,9 +320,8 @@ class MainWindow(QMainWindow):
             )
 
     @pyqtSlot()
-    @timed
     def apply_to_game(self):
-        """Apply merged sources + user edits to game installation and backup existing file."""
+        """Start the background Apply-to-Game pipeline."""
         if not self.entries:
             QMessageBox.warning(self, "Warning", "Please load a file first")
             return
@@ -331,138 +330,53 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Warning", "Please configure game install path in Config tab")
             return
 
-        target_path = AppSettings.get_global_ini_path()
+        self.worker_coord.start_apply_to_game(
+            entries=list(self.entries),
+            target_path=AppSettings.get_global_ini_path(),
+            backups_dir=AppSettings.get_backups_dir(),
+            cache_dir=AppSettings.get_cache_dir(),
+            user_ini_path=AppSettings.get_user_ini_path(),
+            show_frontend_version=AppSettings.get_show_frontend_version_stamp(),
+            max_backups=_MAX_BACKUPS,
+        )
 
-        try:
-            target_path.parent.mkdir(parents=True, exist_ok=True)
+    @pyqtSlot(str)
+    def _on_apply_error(self, message: str) -> None:
+        self._status_bar().showMessage("Apply failed")
+        QMessageBox.critical(self, "Apply Failed", message)
 
-            backup_path = create_apply_backup(target_path, AppSettings.get_backups_dir(), _MAX_BACKUPS)
+    @pyqtSlot(bool, object)
+    def _on_apply_finished(self, success: bool, result: object) -> None:
+        if not success:
+            if isinstance(result, dict) and result.get("cancelled"):
+                self._status_bar().showMessage("Apply cancelled")
+            return
+        if not isinstance(result, dict):
+            return
 
-            # Build final merged dict by re-merging all sources with user edits
-            # This ensures Apply uses the latest source versions (catches any file
-            # that has changed — or disappeared — since the initial Load).
-            sources_dict, hierarchy, _mrk = load_sources_from_settings()
+        from src.utils.user_cfg import ensure_user_cfg_language
 
-            # Warn if any enabled non-user official source failed to load.
-            # Because load_sources_from_settings() runs right above, a source that
-            # was present at Load time but is now missing (e.g. network drive gone)
-            # will correctly appear here and the user can cancel before a partial
-            # apply is written.
-            missing_sources = [
-                name
-                for name in hierarchy
-                if name in AppSettings.AVAILABLE_SOURCES
-                and name != AppSettings.SOURCE_USER
-                and name not in sources_dict
-                and AppSettings.is_source_enabled(name)
-            ]
-            if missing_sources:
-                names = ", ".join(missing_sources)
-                reply = QMessageBox.warning(
-                    self,
-                    "Missing Sources",
-                    f"The following enabled sources could not be loaded:\n\n  {names}\n\n"
-                    "Their customizations will NOT be included in the applied file.\n\n"
-                    "Apply anyway?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.No,
-                )
-                if reply != QMessageBox.StandardButton.Yes:
-                    return
-
-            # Build user overrides dict from entries with custom_value
-            user_overrides_dict = {entry.key: entry.custom_value for entry in self.entries if entry.custom_value}
-
-            # Merge all sources in hierarchy order, with user edits on top
-            merged_dict = merge_sources_by_hierarchy(sources_dict, hierarchy, user_overrides_dict)
-
-            # Stamp the main-menu version chip so the game shows that
-            # Open Strings is active. Idempotent across re-applies and
-            # version bumps; skipped if stock doesn't ship the key.
-            merged_dict = _stamp_frontend_version(
-                merged_dict,
-                enabled=AppSettings.get_show_frontend_version_stamp(),
+        QTimer.singleShot(0, ensure_user_cfg_language)
+        target_path = result["target_path"]
+        user_count = result["user_count"]
+        enhancement_categories = result["enhancement_categories"]
+        enhancement_count = sum(enhancement_categories.values())
+        self._status_bar().showMessage(f"Applied to game | {user_count} user edits | {enhancement_count} enhancements")
+        if enhancement_categories:
+            breakdown = "\n".join(
+                f"    {category}: {count:,}"
+                for category, count in sorted(enhancement_categories.items(), key=lambda item: item[1], reverse=True)
             )
-
-            source_paths = {name: AppSettings.get_source_path(name) for name in hierarchy}
-            base_file = find_apply_base_file(hierarchy, source_paths, AppSettings.get_cache_dir())
-
-            if not base_file:
-                raise FileNotFoundError("No base file found. Configure sources and download them first.")
-
-            # Use merger to preserve original file structure
-            from src.merger.ini_merger import merge_ini_files
-
-            merge_ini_files(str(base_file), merged_dict, str(target_path))
-
-            # Validate written file against stock base. Pass the already-parsed
-            # base.ini key set so validation skips a redundant 87k-line parse.
-            # sources_dict["global"] holds the parsed base.ini from
-            # load_sources_from_settings() above; fall back to on-disk read if
-            # the global source wasn't loaded (e.g. missing cache).
-            stock_keys_hint = set(sources_dict["global"].keys()) if AppSettings.SOURCE_GLOBAL in sources_dict else None
-            validation_msg = self._validate_applied_file(target_path, stock_keys=stock_keys_hint)
-
-            if validation_msg:
-                # Delete the bad file and restore the backup we just made
-                try:
-                    target_path.unlink()
-                    logger.warning(f"Deleted invalid output file: {target_path}")
-                except Exception as del_err:
-                    logger.error(f"Could not delete invalid file: {del_err}")
-
-                if backup_path and backup_path.exists():
-                    try:
-                        shutil.copy2(backup_path, target_path)
-                        logger.info(f"Restored backup: {backup_path.name}")
-                        restore_note = f"\n\nThe previous file has been restored from backup:\n{backup_path.name}"
-                    except Exception as restore_err:
-                        logger.error(f"Could not restore backup: {restore_err}")
-                        restore_note = "\n\nCould not restore backup — game will use vanilla text."
-                else:
-                    restore_note = "\n\nNo backup was available to restore."
-
-                self._status_bar().showMessage("Apply failed — validation error")
-                QMessageBox.critical(
-                    self,
-                    "Validation Failed",
-                    f"The written file failed validation and has been deleted.\n\n{validation_msg}{restore_note}",
-                )
-                return
-
-            # Save user overrides to AppData
-            from src.utils.user_ini_manager import save_user_ini
-
-            user_count = save_user_ini(self.entries, AppSettings.get_user_ini_path())
-
-            # Count enhancement entries, broken down by category.
-            enhancement_categories: Counter[str] = Counter(
-                entry.category for entry in self.entries if entry.source_file == "enhancements"
-            )
-            enhancement_count = sum(enhancement_categories.values())
-
-            # Ensure user.cfg has language setting
-            from src.utils.user_cfg import ensure_user_cfg_language
-
-            QTimer.singleShot(0, ensure_user_cfg_language)
-
-            logger.info(f"Applied to game: {target_path}")
-            self._status_bar().showMessage(
-                f"Applied to game | {user_count} user edits | {enhancement_count} enhancements"
-            )
-            if enhancement_categories:
-                breakdown = "\n".join(f"    {cat}: {count:,}" for cat, count in enhancement_categories.most_common())
-                enhancement_block = f"  Open Strings enhancements ({enhancement_count:,} total):\n{breakdown}"
-            else:
-                enhancement_block = "  Open Strings enhancements: 0"
-            QMessageBox.information(
-                self,
-                "Success",
-                f"Applied to {target_path}\n\n  User edits: {user_count}\n{enhancement_block}",
-            )
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to apply to game: {e}")
-            logger.error(f"Error applying to game: {e}")
+            enhancement_block = f"  Open Strings enhancements ({enhancement_count:,} total):\n{breakdown}"
+        else:
+            enhancement_block = "  Open Strings enhancements: 0"
+        backup_path = result.get("backup_path")
+        backup_note = f"\n\nPrevious game file backed up as {backup_path.name}." if backup_path else ""
+        QMessageBox.information(
+            self,
+            "Success",
+            f"Applied to {target_path}\n\n  User edits: {user_count}\n{enhancement_block}{backup_note}",
+        )
 
     def _validate_applied_file(
         self,
@@ -527,8 +441,7 @@ class MainWindow(QMainWindow):
         cache_dir = AppSettings.get_cache_dir()
         cached_files = list(cache_dir.glob("*.ini")) + list(cache_dir.glob("*.txt"))
 
-        # Also check for dataforge directory
-        dataforge_dir = cache_dir / "dataforge"
+        dataforge_dir = AppSettings.get_dataforge_cache_dir()
         has_dataforge = dataforge_dir.exists()
 
         if not cached_files and not has_dataforge:
@@ -574,7 +487,7 @@ class MainWindow(QMainWindow):
                 self,
                 "Clear DataForge Cache?",
                 "Also clear the DataForge entity cache?\n\n"
-                "⚠️  Warning: Recreating the DataForge cache takes 5–10 minutes on first run.\n\n"
+                "⚠️  Warning: Recreating the DataForge cache can take 30 minutes or longer on first run.\n\n"
                 "The DataForge cache contains extracted entity data used for generating\n"
                 "ship and weapon stats. You can keep this cache and only clear the INI files\n"
                 "if you just want to refresh the localization strings.\n\n"
@@ -700,54 +613,8 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     @timed
     def perform_merge_and_reload(self):
-        """Perform merge of configured sources and reload table.
-
-        Called when user saves configuration in Config tab. Loads all configured
-        sources, merges them in hierarchy order, and updates the table display.
-        """
-        pending_edits = self._snapshot_pending_user_edits()
-        try:
-            # Load all configured sources
-            sources_dict, hierarchy, enhancements_key_categories = load_sources_from_settings()
-
-            if not sources_dict or not hierarchy:
-                QMessageBox.warning(
-                    self, "Warning", "No sources configured. Please configure data sources in Config tab."
-                )
-                return
-
-            self._status_bar().showMessage("Merging sources...")
-
-            try:
-                # Load synchronously in main thread
-                logger.info("Merging configured sources...")
-                entries = load_source_files(
-                    sources_dict, hierarchy, enhancements_key_categories=enhancements_key_categories
-                )
-                logger.info(f"Merge complete: {len(entries)} entries")
-                restored = self._restore_pending_user_edits(entries, pending_edits)
-                if restored:
-                    logger.info(f"Restored {restored} in-memory user edits not yet persisted to user.ini")
-                self.entries = entries
-                self.default_values = dict(sources_dict.get("global", {}))
-                self.update_category_combo()
-                self._model.set_data_source(
-                    self.entries,
-                    self.default_values,
-                    AppSettings.get_favorite_prefix(),
-                )
-                self.apply_filters()
-
-                # Update status bar with entry counts and per-source status
-                self._update_status_bar()
-            except Exception as e:
-                logger.exception(f"Error during merge: {e}")
-                QMessageBox.critical(self, "Error", f"Failed to merge sources: {e}")
-                self._status_bar().showMessage("Merge failed")
-
-        except Exception as e:
-            logger.exception(f"Error in perform_merge_and_reload: {e}")
-            QMessageBox.critical(self, "Error", f"Failed to load sources: {e}")
+        """Reload configured sources without blocking the UI thread."""
+        self.worker_coord.start_file_loading("Merging sources...")
 
     # ── INI Import ────────────────────────────────────────────────────────────
 
@@ -775,6 +642,9 @@ class MainWindow(QMainWindow):
             self._render_about_html()
         if hasattr(self, "help_browser"):
             self._render_help_html()
+        current = self.table.currentIndex()
+        if current.isValid():
+            self._on_preview_row_changed(current, QModelIndex())
 
     def _handle_import_ini(self):
         """Handle Import INI button: get source, validate, resolve conflicts, merge."""
@@ -971,13 +841,20 @@ class MainWindow(QMainWindow):
             return
 
         backup_dir = AppSettings.get_backups_dir()
+        if not (AppSettings.get_cache_dir() / "base.ini").is_file():
+            QMessageBox.warning(
+                self,
+                "Cannot Validate Backup",
+                "Extract base localization for this channel before restoring a backup.",
+            )
+            return
 
         # Open file dialog to select backup
         backup_file, _ = QFileDialog.getOpenFileName(
             self,
             "Select Backup File to Restore",
             str(backup_dir),
-            "Backup Files (*.bak_*);;INI Files (*.ini);;All Files (*)",
+            "Open Strings backups (global.ini.bak_*)",
         )
 
         if not backup_file:
@@ -986,12 +863,25 @@ class MainWindow(QMainWindow):
         try:
             target_path = AppSettings.get_global_ini_path()
             backup_file_path = Path(backup_file)
-
-            # Restore the backup
-            shutil.copy2(str(backup_file_path), str(target_path))
+            previous_backup = restore_apply_backup(
+                backup_file_path,
+                target_path,
+                backup_dir,
+                _MAX_BACKUPS,
+                lambda staged: self._validate_applied_file(staged),
+            )
 
             logger.info(f"Restored backup from {backup_file} to {target_path}")
-            QMessageBox.information(self, "Success", f"Backup restored from:\n{backup_file_path.name}")
+            backup_note = (
+                f"\n\nThe previous game file was saved as:\n{previous_backup.name}"
+                if previous_backup is not None
+                else ""
+            )
+            QMessageBox.information(
+                self,
+                "Success",
+                f"Backup restored from:\n{backup_file_path.name}{backup_note}",
+            )
             self._show_loading_progress("Reloading restored backup...")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to restore backup: {e}")
@@ -1135,6 +1025,7 @@ class MainWindow(QMainWindow):
         consistent view across the whole UI.
         """
         logger.info(f"MainWindow reacting to channel change → {channel}")
+        self._release_entries_for_switch()
 
         # Re-point the stored file-path sources at the new channel's folders.
         # The path helpers themselves (get_cache_dir, get_user_ini_path) are
@@ -1188,6 +1079,7 @@ class MainWindow(QMainWindow):
     def _on_data_dir_changed(self, data_dir: str) -> None:
         """Reload the app against a newly selected Open Strings data folder."""
         logger.info(f"MainWindow reacting to data folder change → {data_dir}")
+        self._release_entries_for_switch()
 
         AppSettings.ensure_user_ini_file()
         self._sync_canonical_source_paths(f"for data folder {data_dir}")
@@ -1286,6 +1178,7 @@ class MainWindow(QMainWindow):
 
         self.default_values = default_values
         self.entries = entries
+        self._entries_user_ini_path = AppSettings.get_user_ini_path()
         self.update_category_combo()
         self._sync_menu_heading_editor()
 
@@ -1331,6 +1224,7 @@ class MainWindow(QMainWindow):
         entry.status = "Modified" if entry.custom_value else "Unmodified"
         self.apply_filters()
         self._update_status_bar()
+        self._save_user_edits()
 
     def _reset_menu_heading(self) -> None:
         entry = self._menu_heading_entry()
@@ -1341,6 +1235,27 @@ class MainWindow(QMainWindow):
         self.menu_heading_input.setText(entry.original_value)
         self.apply_filters()
         self._update_status_bar()
+        self._save_user_edits()
+
+    def _save_user_edits(self, *_args) -> None:
+        """Persist edits to the user.ini the current entries were loaded from."""
+        path = self._entries_user_ini_path
+        if path is None or not self.entries:
+            return
+        from src.utils.user_ini_manager import save_user_ini
+
+        try:
+            save_user_ini(self.entries, path)
+        except OSError as e:
+            logger.error(f"Failed to save user edits to {path}: {e}")
+            self._status_bar().showMessage(f"Could not save edits: {e}")
+
+    def _release_entries_for_switch(self) -> None:
+        """Save the outgoing channel's edits, then drop its entries so they can't carry over."""
+        self._save_user_edits()
+        self.entries = []
+        self._entries_user_ini_path = None
+        self._model.set_data_source([], {}, AppSettings.get_favorite_prefix())
 
     @pyqtSlot(str)
     def _on_loading_error(self, error_msg: str):
@@ -1419,13 +1334,16 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 logger.error(f"Failed to auto-save overrides on exit: {e}")
 
-        # Detach log handler before widgets are destroyed
-        self.log_tab.remove_handler()
-
         # Cleanly shut down all background workers before the window is destroyed.
         # Without this, Qt may tear down the window mid-operation and leave threads
         # in an undefined state or DataForge temp files half-written.
-        self.worker_coord.cleanup_all()
+        if not self.worker_coord.cleanup_all():
+            self._status_bar().showMessage("A background task is still stopping; close again after it finishes.")
+            event.ignore()
+            return
+
+        # Detach log handler before widgets are destroyed.
+        self.log_tab.remove_handler()
         self.update_mgr.cleanup()
 
         # Flush registry writes

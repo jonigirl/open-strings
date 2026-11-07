@@ -5,7 +5,10 @@ These functions contain no Qt dependency and can be tested independently.
 """
 
 import logging
+import os
 import shutil
+import tempfile
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -42,6 +45,36 @@ def create_apply_backup(
             logger.warning(f"Could not delete oldest backup {oldest.name}: {err}")
 
     return backup_path
+
+
+def restore_apply_backup(
+    backup_path: Path,
+    target_path: Path,
+    backups_dir: Path,
+    max_backups: int,
+    validate: Callable[[Path], str],
+) -> Path | None:
+    """Restore a validated Open Strings backup without losing the current file."""
+    backups_root = backups_dir.resolve()
+    selected = backup_path.resolve(strict=True)
+    if selected.parent != backups_root or not selected.name.startswith("global.ini.bak_") or not selected.is_file():
+        raise ValueError("Select a backup from the active channel's Open Strings backups folder")
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(dir=target_path.parent, suffix=".restore.tmp")
+    os.close(descriptor)
+    temporary_path = Path(temporary_name)
+    try:
+        shutil.copy2(selected, temporary_path)
+        validation_error = validate(temporary_path)
+        if validation_error:
+            raise ValueError(f"Selected backup failed validation:\n{validation_error}")
+
+        previous_backup = create_apply_backup(target_path, backups_root, max_backups)
+        os.replace(temporary_path, target_path)
+        return previous_backup
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def find_apply_base_file(

@@ -26,6 +26,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
@@ -33,6 +34,7 @@ from PyQt6.QtWidgets import QMessageBox, QProgressDialog
 
 from src.gui.workers import (
     AnimatedProgressDialog,
+    ApplyWorker,
     DataForgeExtractWorker,
     EnhancementsGeneratorWorker,
     FileLoaderWorker,
@@ -63,6 +65,10 @@ class WorkerCoordinator(QObject):
     loading_finished = pyqtSignal(list, dict, list)  # entries, defaults, sort_keys
     loading_error = pyqtSignal(str)
 
+    # ── Apply to Game ────────────────────────────────────────────────────
+    apply_finished = pyqtSignal(bool, object)
+    apply_error = pyqtSignal(str)
+
     # ── P4K extraction ────────────────────────────────────────────────────
     p4k_finished = pyqtSignal(bool)
 
@@ -89,6 +95,7 @@ class WorkerCoordinator(QObject):
 
         # ── Worker instances ──────────────────────────────────────────────
         self._loader_worker: FileLoaderWorker | None = None
+        self._apply_worker: ApplyWorker | None = None
         self._startup_sync_worker: StartupSyncWorker | None = None
         self._p4k_worker: P4kExtractWorker | None = None
         self._enhancements_worker: EnhancementsGeneratorWorker | None = None
@@ -97,6 +104,7 @@ class WorkerCoordinator(QObject):
 
         # ── Progress dialogs ──────────────────────────────────────────────
         self._loading_progress: QProgressDialog | None = None
+        self._apply_progress: AnimatedProgressDialog | None = None
         self._startup_progress: AnimatedProgressDialog | None = None
         self._p4k_progress: AnimatedProgressDialog | None = None
         self._forge_progress_dialog: AnimatedProgressDialog | None = None
@@ -115,6 +123,7 @@ class WorkerCoordinator(QObject):
             self._forge_worker,
             self._p4k_worker,
             self._loader_worker,
+            self._apply_worker,
             self._startup_sync_worker,
         )
         return any(w is not None and w.isRunning() for w in workers)
@@ -159,6 +168,70 @@ class WorkerCoordinator(QObject):
         self._loader_worker.progress.connect(self._loading_progress.setLabelText)
         self._loader_worker.progress_pct.connect(self._loading_progress.set_progress)
         self._loader_worker.start()
+
+    def start_apply_to_game(
+        self,
+        entries: list,
+        target_path: Path,
+        backups_dir: Path,
+        cache_dir: Path,
+        user_ini_path: Path,
+        show_frontend_version: bool,
+        max_backups: int,
+    ) -> None:
+        if self._apply_worker is not None:
+            return
+
+        self._parent._set_toolbar_enabled(False)
+        self._apply_progress = AnimatedProgressDialog("Preparing to apply…", parent=self._parent, title="Apply to Game")
+        worker = ApplyWorker(
+            entries,
+            target_path,
+            backups_dir,
+            cache_dir,
+            user_ini_path,
+            show_frontend_version,
+            max_backups,
+        )
+        self._apply_worker = worker
+        worker.progress.connect(self._apply_progress.setLabelText)
+        worker.missing_sources.connect(self._confirm_apply_missing_sources)
+        worker.error.connect(self.apply_error)
+        worker.completed.connect(self._on_apply_completed)
+        worker.start()
+
+    @pyqtSlot(list)
+    def _confirm_apply_missing_sources(self, names: list[str]) -> None:
+        if self._apply_progress is not None:
+            self._apply_progress.hide()
+        reply = QMessageBox.warning(
+            self._parent,
+            "Missing Sources",
+            f"The following enabled sources could not be loaded:\n\n  {', '.join(names)}\n\n"
+            "Their customizations will NOT be included in the applied file.\n\nApply anyway?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if self._apply_worker is not None:
+            self._apply_worker.confirm_missing_sources(reply == QMessageBox.StandardButton.Yes)
+        if self._apply_progress is not None and self._apply_worker is not None:
+            self._apply_progress.show()
+
+    def confirm_apply_sources(self, apply_anyway: bool) -> None:
+        if self._apply_worker is not None:
+            self._apply_worker.confirm_missing_sources(apply_anyway)
+
+    @pyqtSlot(bool, object)
+    def _on_apply_completed(self, success: bool, result: object) -> None:
+        if self._apply_progress is not None:
+            self._apply_progress.close()
+            self._apply_progress = None
+        if self._apply_worker is not None:
+            self._apply_worker.quit()
+            self._apply_worker.wait()
+            self._apply_worker = None
+        self._parent._set_toolbar_enabled(True)
+        self.apply_finished.emit(success, result)
 
     @pyqtSlot(list, dict, list)
     def _on_loading_done(self, entries: list, default_values: dict, sort_keys: list) -> None:
@@ -427,15 +500,16 @@ class WorkerCoordinator(QObject):
 
     # ── Cleanup ───────────────────────────────────────────────────────────
 
-    def cleanup_all(self) -> None:
+    def cleanup_all(self) -> bool:
         """Gracefully shut down all running workers.
 
-        Called from ``closeEvent`` before the window is destroyed.  Gives
-        each worker up to ``_WORKER_QUIT_TIMEOUT_MS`` to stop; logs a warning
-        if one doesn't respond in time (avoids hanging the close).
+        Called from ``closeEvent`` before the window is destroyed. Returns
+        False if any worker remains active so the caller can keep its owner alive.
         """
+        all_stopped = True
         workers = (
             self._loader_worker,
+            self._apply_worker,
             self._startup_sync_worker,
             self._p4k_worker,
             self._enhancements_worker,
@@ -447,8 +521,10 @@ class WorkerCoordinator(QObject):
                     worker.cancel()
                 worker.quit()
                 if not worker.wait(_WORKER_QUIT_TIMEOUT_MS):
+                    all_stopped = False
                     logger.warning(
                         "Worker %s did not stop within %d ms on close",
                         type(worker).__name__,
                         _WORKER_QUIT_TIMEOUT_MS,
                     )
+        return all_stopped

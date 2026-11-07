@@ -3,7 +3,7 @@
 from unittest.mock import patch
 
 import pytest
-from src.utils.apply_engine import create_apply_backup, find_apply_base_file
+from src.utils.apply_engine import create_apply_backup, find_apply_base_file, restore_apply_backup
 
 pytestmark = pytest.mark.unit
 
@@ -30,6 +30,69 @@ class TestCreateApplyBackup:
         assert result.exists()
         assert result.name.startswith("global.ini.bak_")
         assert result.read_text(encoding="utf-8") == "key=value"
+
+    def test_valid_restore_backs_up_current_file_and_replaces_it(self, tmp_path):
+        backups = tmp_path / "backups"
+        backups.mkdir()
+        selected = backups / "global.ini.bak_20260101_000000"
+        selected.write_text("restored=1", encoding="utf-8")
+        target = tmp_path / "game" / "global.ini"
+        target.parent.mkdir()
+        target.write_text("current=1", encoding="utf-8")
+        validated = []
+
+        previous = restore_apply_backup(
+            selected,
+            target,
+            backups,
+            max_backups=5,
+            validate=lambda staged: validated.append(staged.read_text(encoding="utf-8")) or "",
+        )
+
+        assert target.read_text(encoding="utf-8") == "restored=1"
+        assert validated == ["restored=1"]
+        assert previous is not None
+        assert previous.read_text(encoding="utf-8") == "current=1"
+
+    def test_rejects_file_outside_active_backup_folder(self, tmp_path):
+        backups = tmp_path / "backups"
+        backups.mkdir()
+        outside = tmp_path / "unrelated.ini"
+        outside.write_text("not a backup", encoding="utf-8")
+        target = tmp_path / "global.ini"
+        target.write_text("current=1", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="active channel"):
+            restore_apply_backup(outside, target, backups, 5, lambda _path: "")
+
+        assert target.read_text(encoding="utf-8") == "current=1"
+
+    def test_rejects_invalid_backup_without_replacing_current_file(self, tmp_path):
+        backups = tmp_path / "backups"
+        backups.mkdir()
+        selected = backups / "global.ini.bak_20260101_000000"
+        selected.write_text("invalid=1", encoding="utf-8")
+        target = tmp_path / "global.ini"
+        target.write_text("current=1", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="failed validation"):
+            restore_apply_backup(selected, target, backups, 5, lambda _path: "missing stock key")
+
+        assert target.read_text(encoding="utf-8") == "current=1"
+        assert list(backups.glob("global.ini.bak_*")) == [selected]
+
+    def test_stages_selected_backup_before_pruning_at_limit(self, tmp_path):
+        backups = tmp_path / "backups"
+        backups.mkdir()
+        selected = backups / "global.ini.bak_20260101_000000"
+        selected.write_text("restored=1", encoding="utf-8")
+        target = tmp_path / "global.ini"
+        target.write_text("current=1", encoding="utf-8")
+
+        restore_apply_backup(selected, target, backups, max_backups=1, validate=lambda _path: "")
+
+        assert target.read_text(encoding="utf-8") == "restored=1"
+        assert len(list(backups.glob("global.ini.bak_*"))) == 1
 
     def test_backup_name_includes_timestamp(self, tmp_path):
         target = tmp_path / "global.ini"

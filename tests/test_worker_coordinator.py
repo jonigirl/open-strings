@@ -113,7 +113,7 @@ class TestCleanupAll:
         w.isRunning.return_value = True
         w.wait.return_value = True  # finished within timeout
         coord._loader_worker = w
-        coord.cleanup_all()
+        assert coord.cleanup_all() is True
         w.quit.assert_called_once()
         w.wait.assert_called_once()
 
@@ -131,8 +131,35 @@ class TestCleanupAll:
         w = _mock_worker()
         w.isRunning.return_value = False  # already stopped
         coord._loader_worker = w
-        coord.cleanup_all()
+        assert coord.cleanup_all() is True
         w.quit.assert_not_called()
+
+    def test_cleanup_reports_worker_that_exceeds_timeout(self, qtbot):
+        coord, _ = _make_coordinator(qtbot)
+        w = _mock_worker()
+        w.isRunning.return_value = True
+        w.wait.return_value = False
+        coord._loader_worker = w
+
+        assert coord.cleanup_all() is False
+
+    def test_main_window_ignores_close_while_worker_is_still_running(self):
+        from unittest.mock import MagicMock
+
+        from PyQt6.QtGui import QCloseEvent
+        from src.gui.main_window import MainWindow
+
+        window = MagicMock()
+        window.entries = []
+        window.worker_coord.cleanup_all.return_value = False
+        event = QCloseEvent()
+        event.accept()
+
+        MainWindow.closeEvent(window, event)
+
+        assert not event.isAccepted()
+        window._status_bar().showMessage.assert_called_once()
+        window.log_tab.remove_handler.assert_not_called()
 
     def test_cleanup_all_none_is_safe(self, qtbot):
         coord, _ = _make_coordinator(qtbot)
