@@ -2,9 +2,11 @@
 
 ## 1.5.3 Validation
 
-- [ ] Build a fresh local smoke installer from current `main` and verify the Nov 7 changes.
+- [x] Build a fresh local smoke installer from committed `main` (2026-11-07); verify its bundled files and checksums.
+- [ ] Run the local smoke checklist on this installer; installation and app runtime remain untested.
 - [ ] Run the 1.5.3 smoke checklist in [TESTING.md](TESTING.md) against PTU.
-- [ ] Re-analyze the latest 4.10.3 PTU extraction after each meaningful patch; resolve enhancement data issues before release.
+- [x] Compare current LIVE/PTU base localization and generated outputs (2026-11-07): PTU has 265 normalized new keys, 1 removed, 99 changed; generated deltas are recorded in the private handover.
+- [ ] Repeat the LIVE/PTU comparison after each meaningful new PTU patch; resolve enhancement data issues before release.
 - [ ] Once 4.10.3 reaches LIVE, extract and compare LIVE data, verify generated enhancements, and complete the LIVE smoke test.
 - [ ] Prepare the 1.5.3 release only after LIVE validation and all identified issues are resolved.
 
@@ -40,4 +42,4 @@ These are candidates for separate review and approval, not current release work.
 - [ ] Split the enhancement generator after integration coverage is sufficient.
 - [ ] Review candidate enhancement additions, including melee items and additional weapon statistics.
 - [ ] Identify and add useful journal entries that are not currently covered.
-- [ ] Verify that extraction and generation cover all commodities present in the game data.
+- [ ] Verify all commodity entities: current caches contain 73 normalized carryable commodity names; all 26 blueprint-used names map to 50 generated localization pairs, while 16 other names lack direct loc matches and need alias/variant classification.
