@@ -26,10 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Build script failures return a non-zero exit code, and signed builds verify
   both signatures.
 - Type checking passes across the application source.
+- Detailed extraction and generation progress no longer repeats in the
+  Enhancements tab and status bar.
 
 ### Changed
 
 - Generation runs once after updating so existing enhancements pick up these fixes.
+- Windows CI tests both locked and lowest-compatible direct dependencies, and
+  development dependency constraints require versions with known security fixes.
 - Correction to the 1.4.0 and 1.4.1 entries: the `EnhancementPipeline` class is
   incomplete and not used for generation, and mypy did not pass on the application
   source until this release. Strict mode is not enabled.

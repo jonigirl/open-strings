@@ -21,6 +21,13 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 
+[tool.uv]
+constraint-dependencies = [
+    "filelock>=4.2.1",
+    "setuptools>=84.1.0",
+    "virtualenv>=21.14.9",
+]
+
 [dependency-groups]
 dev = [
     "mypy>=1.20",
@@ -52,7 +59,7 @@ ignore_missing_imports = true
 check_untyped_defs = true
 
 [tool.pytest.ini_options]
-minversion = "6.0"
+minversion = "9.0"
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -98,4 +105,3 @@ exclude_lines = [
     "pragma: no cover",
     "if TYPE_CHECKING:",
 ]
-

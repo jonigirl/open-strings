@@ -31,6 +31,18 @@ uv run pytest tests/ --cov-report=html
 
 All pytest settings (timeout, coverage, markers) are configured in `pyproject.toml` under `[tool.pytest.ini_options]`. No separate `pytest.ini` is needed.
 
+CI runs the Windows suite with both the committed lockfile and the lowest
+compatible direct dependency versions. To reproduce the minimum-version run,
+use a disposable checkout: the sync changes its lockfile and environment.
+
+```bash
+uv sync --all-groups --resolution lowest-direct
+uv run --locked --resolution lowest-direct python -m pytest tests/ -p no:xdist --tb=short -q
+```
+
+Keep the resolution option on both commands so the test run does not switch
+back to the default resolution.
+
 ---
 
 ## Test Structure
@@ -103,7 +115,8 @@ uv run pytest tests/ --tb=short
 2. Open the Log tab and pop it out before starting generation. Select PTU in Config,
    confirm the installed game path, and run Generate Enhancements. The first run
    after updating regenerates enhancements; allow several minutes. Verify progress
-   continues and the log remains visible.
+   continues and the log remains visible. Detailed progress belongs in the dialog,
+   while the Enhancements tab and status bar show only short activity summaries.
 3. Confirm successful integrity validation and generation, then return the log to
    its tab. Check that earlier entries remain and appear only once.
 4. Enable **Armor & Suits** and confirm an armor or helmet description shows

@@ -710,7 +710,7 @@ class TestAnimatedProgressDialog:
         assert len(dialog.labelText()) <= 300
         assert dialog._message_label.toolTip() == message
 
-    def test_inline_operation_heading_stays_visible(self):
+    def test_inline_operation_shows_activity_summary(self):
         from src.gui.enhancements_tab import EnhancementsTab
 
         tab = SimpleNamespace(
@@ -720,8 +720,8 @@ class TestAnimatedProgressDialog:
             _operation_label=MagicMock(),
         )
         EnhancementsTab.set_operation_running(tab, "Extracting DataForge")
-        EnhancementsTab.set_operation_progress(tab, "Checking cached records: 256 / 1000")
-        tab._operation_label.setText.assert_called_with("Extracting DataForge\nChecking cached records: 256 / 1000")
+        tab._operation_label.setText.assert_called_once_with("Extracting DataForge")
+        tab._operation_label.setVisible.assert_called_once_with(True)
 
     def test_starts_indeterminate(self, qtbot):
         from src.gui.workers import AnimatedProgressDialog

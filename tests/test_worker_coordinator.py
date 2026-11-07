@@ -247,6 +247,67 @@ class TestP4kExtraction:
 # ── DataForge extraction ──────────────────────────────────────────────────────
 
 
+@pytest.mark.regression
+@pytest.mark.parametrize("operation", ["dataforge", "enhancements"])
+def test_detailed_progress_stays_in_dialog(qtbot, tmp_path, operation):
+    from PyQt6.QtWidgets import QLabel
+    from src.gui.enhancements_tab import EnhancementsTab
+    from src.gui.workers import DataForgeExtractWorker, EnhancementsGeneratorWorker
+
+    coord, window = _make_coordinator(qtbot)
+    with patch.object(EnhancementsTab, "refresh_enhancements_status"):
+        tab = EnhancementsTab()
+    window.setCentralWidget(tab)
+    window.show()
+    getattr(coord, f"{operation}_operation_running").connect(tab.set_operation_running)
+    getattr(coord, f"{operation}_finished").connect(lambda _success: tab.set_operation_idle())
+
+    if operation == "dataforge":
+        worker = DataForgeExtractWorker(
+            tmp_path / "Data.p4k", tmp_path / "unp4k.exe", tmp_path / "unforge.exe", tmp_path / "cache"
+        )
+        worker_name = "DataForgeExtractWorker"
+        start = coord.start_dataforge_extraction
+        finish = coord._on_dataforge_done
+    else:
+        worker = EnhancementsGeneratorWorker(categories={"ship_descs"})
+        worker_name = "EnhancementsGeneratorWorker"
+        start = coord.start_enhancements_generation
+        finish = coord._on_enhancements_done
+
+    with (
+        patch(f"src.gui.worker_coordinator.{worker_name}", return_value=worker),
+        patch.object(worker, "start"),
+        patch.object(coord, "_ensure_tools_downloaded", return_value=True),
+    ):
+        start()
+
+    dialog = getattr(coord, f"_{'forge' if operation == 'dataforge' else 'enhancements'}_progress_dialog")
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    heading = tab._operation_label.text()
+    status = window.status_bar_mgr.show_message.call_args
+    message = "Exporter Progress: Exported 5000/12000 records"
+    try:
+        assert not tab._generate_enhancements_btn.isEnabled()
+        worker.progress.emit(message)
+        worker.progress_pct.emit(5000, 12000, message)
+        assert dialog.labelText() == message
+        assert dialog.value() == 5000
+        assert dialog.maximum() == 12000
+        assert tab._operation_label.text() == heading
+        window.status_bar_mgr.show_message.assert_called_once()
+        assert window.status_bar_mgr.show_message.call_args == status
+        assert all(message not in label.text() for label in tab.findChildren(QLabel))
+    finally:
+        finish(True)
+
+    assert not dialog.isVisible()
+    assert not tab._operation_label.isVisible()
+    assert tab._operation_label.text() == ""
+    assert tab._generate_enhancements_btn.isEnabled()
+
+
 class TestDataforgeExtraction:
     def test_dataforge_finished_signal_on_success(self, qtbot):
         coord, _ = _make_coordinator(qtbot)

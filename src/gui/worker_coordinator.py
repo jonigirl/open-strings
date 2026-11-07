@@ -67,14 +67,12 @@ class WorkerCoordinator(QObject):
     p4k_finished = pyqtSignal(bool)
 
     # ── DataForge extraction ──────────────────────────────────────────────
-    # operation_running / operation_progress allow MainWindow to wire enhancements_tab
+    # operation_running allows MainWindow to wire enhancements_tab
     dataforge_operation_running = pyqtSignal(str)  # label text for tab widget
-    dataforge_operation_progress = pyqtSignal(str)  # progress label text
     dataforge_finished = pyqtSignal(bool)
 
     # ── Enhancements generation ───────────────────────────────────────────
     enhancements_operation_running = pyqtSignal(str)
-    enhancements_operation_progress = pyqtSignal(str)
     enhancements_operation_progress_pct = pyqtSignal(int)
     enhancements_finished = pyqtSignal(bool)
     enhancements_error = pyqtSignal(str)
@@ -258,8 +256,6 @@ class WorkerCoordinator(QObject):
         self._forge_worker = DataForgeExtractWorker(p4k_path, unp4k_exe, unforge_exe, forge_dir)
         worker = self._forge_worker
         dialog = self._forge_progress_dialog
-        worker.progress.connect(self.dataforge_operation_progress)
-        worker.progress.connect(self._parent.status_bar_mgr.show_message)
         worker.progress.connect(dialog.setLabelText)
         worker.progress_pct.connect(dialog.set_progress)
         worker.error.connect(self._on_dataforge_err)
@@ -329,8 +325,6 @@ class WorkerCoordinator(QObject):
 
         self._enhancements_worker = EnhancementsGeneratorWorker(categories=categories, force_full=force_full)
         worker = self._enhancements_worker
-        worker.progress.connect(self.enhancements_operation_progress)
-        worker.progress.connect(self._parent.status_bar_mgr.show_message)
         worker.progress.connect(dialog.setLabelText)
         worker.progress_pct.connect(dialog.set_progress)
         worker.progress_pct.connect(self.enhancements_operation_progress_pct)

@@ -138,7 +138,6 @@ class EnhancementsTab(QWidget):
         self._operation_label = QLabel()
         self._operation_label.setStyleSheet("font-size: 16px; color: #2196F3;")
         self._operation_label.setWordWrap(True)
-        self._operation_title = ""
         self._operation_label.setVisible(False)
         gl.addWidget(self._operation_label)
 
@@ -279,18 +278,13 @@ class EnhancementsTab(QWidget):
     # ── Operation state ───────────────────────────────────────────────────────
 
     def set_operation_running(self, message: str):
-        """Disable the enhancements button and show an inline progress message."""
+        """Disable enhancement controls and show a short activity summary."""
         self._generate_enhancements_btn.setEnabled(False)
         self._apply_categories_btn.setEnabled(False)
         for checkbox in self._enhancements_checkboxes.values():
             checkbox.setEnabled(False)
         self._operation_label.setText(message)
-        self._operation_title = message
         self._operation_label.setVisible(True)
-
-    def set_operation_progress(self, message: str):
-        """Update the inline progress message without changing button state."""
-        self._operation_label.setText(f"{self._operation_title}\n{message}")
 
     def set_operation_idle(self):
         """Re-enable the enhancements button and hide the progress message."""
@@ -300,7 +294,6 @@ class EnhancementsTab(QWidget):
         self._on_category_checkbox_changed()
         self._operation_label.setVisible(False)
         self._operation_label.setText("")
-        self._operation_title = ""
 
     # ── Status refresh ────────────────────────────────────────────────────────
 

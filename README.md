@@ -32,9 +32,11 @@ Open Strings uses a pinned patched unforge exporter that preserves records shari
 source path and repairs invalid XML record names. A completion manifest is checked
 against the DCB record index before a new cache becomes live.
 
-Initial extraction can take 30 minutes or longer. The Log tab shows live exporter
-progress, and cache health checks show their own record counts. Exports stop after
-two hours overall or 30 minutes without output, leaving the previous cache intact.
+Initial extraction can take 30 minutes or longer. Detailed progress appears in the
+progress dialog, and the Log tab shows live exporter messages. Cache health checks
+show their own record counts. The Enhancements tab and status bar keep short activity
+summaries rather than repeating exporter output. Exports stop after two hours overall
+or 30 minutes without output, leaving the previous cache intact.
 
 Record coverage does not guarantee that every game reference resolves. Undefined
 references in the game data and cyclic structures are reported rather than replaced
