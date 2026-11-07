@@ -4,8 +4,11 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QMainWindow, QWidget
 from src.gui.main_window import MainWindow
 from src.gui.string_table_model import COL_CURRENT, COL_STAR
+from src.gui.window_setup import create_toolbar
 from src.models.string_model import StringEntry
 from src.utils.settings import AppSettings
 
@@ -150,3 +153,47 @@ def test_advanced_view_keeps_per_column_filters():
     )
 
     assert MainWindow._filtered_entry_indices(window) == [0]
+
+
+def test_toolbar_mouse_clicks_call_mode_handler(qtbot, monkeypatch):
+    window = QMainWindow()
+    window.set_view_mode = Mock()
+    for name in (
+        "open_localization_dir",
+        "apply_to_game",
+        "restore_backup",
+        "clear_localization",
+        "clear_cache",
+        "export_locpack",
+        "show_help",
+        "_start_tutorial",
+        "apply_filters",
+        "_on_grouped_sort",
+        "clear_filters",
+        "copy_filtered_to_clipboard",
+    ):
+        setattr(window, name, Mock())
+    container = QWidget()
+    container.setLayout(create_toolbar(window))
+    window.setCentralWidget(container)
+    qtbot.addWidget(window)
+    window.show()
+    monkeypatch.setattr(AppSettings, "set_view_mode", window.set_view_mode)
+
+    assert window.basic_mode_btn.accessibleName() == "Basic view"
+    assert window.advanced_mode_btn.accessibleName() == "Advanced view"
+    assert window.basic_search_input.accessibleName() == "Search localization strings"
+    assert window.category_combo.accessibleName() == "Category filter"
+    assert window.status_combo.accessibleName() == "Status filter"
+
+    qtbot.mouseClick(window.basic_mode_btn, Qt.MouseButton.LeftButton)
+    qtbot.mouseClick(window.advanced_mode_btn, Qt.MouseButton.LeftButton)
+    window.basic_mode_btn.setChecked(True)
+    window.advanced_mode_btn.setChecked(True)
+
+    assert window.set_view_mode.call_args_list == [
+        ((AppSettings.VIEW_MODE_BASIC,),),
+        ((AppSettings.VIEW_MODE_ADVANCED,),),
+        ((AppSettings.VIEW_MODE_BASIC,),),
+        ((AppSettings.VIEW_MODE_ADVANCED,),),
+    ]
