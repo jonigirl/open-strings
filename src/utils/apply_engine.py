@@ -31,8 +31,12 @@ def create_apply_backup(
 
     backup_files = sorted(backups_dir.glob("global.ini.bak_*"), key=lambda f: f.stat().st_mtime)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     backup_path = backups_dir / f"global.ini.bak_{timestamp}"
+    collision = 1
+    while backup_path.exists():
+        backup_path = backups_dir / f"global.ini.bak_{timestamp}_{collision}"
+        collision += 1
     shutil.copy2(target_path, backup_path)
     logger.info(f"Backed up existing file to {backup_path}")
 

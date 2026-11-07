@@ -107,6 +107,21 @@ class TestCreateApplyBackup:
         assert result is not None
         assert result.name == "global.ini.bak_20260617_120000"
 
+    def test_same_timestamp_does_not_overwrite_existing_backup(self, tmp_path):
+        target = tmp_path / "global.ini"
+        target.write_text("first", encoding="utf-8")
+        backups_dir = tmp_path / "backups"
+        backups_dir.mkdir()
+        with patch("src.utils.apply_engine.datetime") as mock_dt:
+            mock_dt.now.return_value.strftime.return_value = "20260617_120000_000000"
+            first = create_apply_backup(target, backups_dir, max_backups=5)
+            target.write_text("second", encoding="utf-8")
+            second = create_apply_backup(target, backups_dir, max_backups=5)
+
+        assert first is not None and second is not None and first != second
+        assert first.read_text(encoding="utf-8") == "first"
+        assert second.read_text(encoding="utf-8") == "second"
+
     def test_prunes_oldest_when_at_limit(self, tmp_path):
         target = tmp_path / "global.ini"
         target.write_text("x=1", encoding="utf-8")

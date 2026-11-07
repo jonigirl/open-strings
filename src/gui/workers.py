@@ -7,6 +7,7 @@ import logging
 import sys
 import threading
 from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 
 from PyQt6.QtCore import QModelIndex, Qt, QThread, pyqtSignal
@@ -257,15 +258,19 @@ class ApplyWorker(QThread):
         user_ini_path: Path,
         show_frontend_version: bool,
         max_backups: int,
+        active_channel: str,
+        user_data_root: Path,
     ) -> None:
         super().__init__()
-        self._entries = entries
+        self._entries = [replace(entry) for entry in entries]
         self._target_path = target_path
         self._backups_dir = backups_dir
         self._cache_dir = cache_dir
         self._user_ini_path = user_ini_path
         self._show_frontend_version = show_frontend_version
         self._max_backups = max_backups
+        self._active_channel = active_channel
+        self._user_data_root = user_data_root
         self._source_decision = threading.Event()
         self._apply_with_missing_sources = False
 
@@ -286,11 +291,19 @@ class ApplyWorker(QThread):
         from src.utils.user_ini_manager import save_user_ini
 
         backup_path: Path | None = None
+        target_written = False
         try:
             self.progress.emit("Loading current sources…")
             sources_dict, hierarchy, _ = load_sources_from_settings()
             if not sources_dict or not hierarchy:
                 raise ValueError("No sources configured. Please configure sources in the Config tab.")
+            if (
+                AppSettings.get_active_channel() != self._active_channel
+                or AppSettings.get_user_data_dir().resolve() != self._user_data_root
+            ):
+                raise RuntimeError(
+                    "The active channel or data folder changed during Apply. No file was written; try again."
+                )
 
             missing_sources = [
                 name
@@ -325,19 +338,14 @@ class ApplyWorker(QThread):
             self._target_path.parent.mkdir(parents=True, exist_ok=True)
             backup_path = create_apply_backup(self._target_path, self._backups_dir, self._max_backups)
             merge_ini_files(base_file, merged_dict, self._target_path)
+            target_written = True
 
             stock_keys = (
                 set(sources_dict[AppSettings.SOURCE_GLOBAL]) if AppSettings.SOURCE_GLOBAL in sources_dict else None
             )
             validation_error = validate_applied_file(self._target_path, self._cache_dir, stock_keys)
             if validation_error:
-                if backup_path is not None and backup_path.exists():
-                    atomic_write_bytes(self._target_path, backup_path.read_bytes())
-                    restore_note = f"The previous file was restored from {backup_path.name}."
-                else:
-                    self._target_path.unlink(missing_ok=True)
-                    restore_note = "No previous file was available to restore."
-                raise ValueError(f"The written file failed validation. {restore_note}\n\n{validation_error}")
+                raise ValueError(f"The written file failed validation:\n{validation_error}")
 
             user_count = save_user_ini(self._entries, self._user_ini_path)
             enhancement_categories = Counter(
@@ -354,6 +362,15 @@ class ApplyWorker(QThread):
                 },
             )
         except Exception as exc:
+            if target_written:
+                try:
+                    if backup_path is not None and backup_path.exists():
+                        atomic_write_bytes(self._target_path, backup_path.read_bytes())
+                    else:
+                        self._target_path.unlink(missing_ok=True)
+                except OSError as rollback_error:
+                    logger.exception("Apply rollback failed: %s", rollback_error)
+                    exc = RuntimeError(f"{exc}\n\nAutomatic rollback failed: {rollback_error}")
             logger.exception("Apply to Game failed: %s", exc)
             self.error.emit(str(exc))
             self.completed.emit(False, {"cancelled": False})

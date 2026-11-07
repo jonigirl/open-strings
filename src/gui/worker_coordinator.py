@@ -178,6 +178,8 @@ class WorkerCoordinator(QObject):
         user_ini_path: Path,
         show_frontend_version: bool,
         max_backups: int,
+        active_channel: str,
+        user_data_root: Path,
     ) -> None:
         if self._apply_worker is not None:
             return
@@ -192,6 +194,8 @@ class WorkerCoordinator(QObject):
             user_ini_path,
             show_frontend_version,
             max_backups,
+            active_channel,
+            user_data_root,
         )
         self._apply_worker = worker
         worker.progress.connect(self._apply_progress.setLabelText)

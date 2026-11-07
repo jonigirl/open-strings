@@ -32,6 +32,7 @@ class FilterHeaderView(QHeaderView):
         self.setSectionsClickable(True)
         self._column_names = column_names
         self._skip_columns = skip_columns or set()
+        self._filter_row_visible = True
         self._filters: list[QLineEdit | QComboBox | None] = []
         self._controls: list[QWidget | None] = []
         self._modes: list[QComboBox | None] = []
@@ -141,13 +142,23 @@ class FilterHeaderView(QHeaderView):
             editor.blockSignals(False)
         self.filter_changed.emit()
 
+    def set_filter_row_visible(self, visible: bool) -> None:
+        self._filter_row_visible = visible
+        self.updateGeometry()
+        self.updateGeometries()
+        self._position_editors()
+        viewport = self.viewport()
+        if viewport is not None:
+            viewport.update()
+
     # ------------------------------------------------------------------
     # Size / paint
     # ------------------------------------------------------------------
 
     def sizeHint(self) -> QSize:
         s = super().sizeHint()
-        return QSize(s.width(), s.height() + self.FILTER_ROW_HEIGHT)
+        extra_height = self.FILTER_ROW_HEIGHT if self._filter_row_visible else 0
+        return QSize(s.width(), s.height() + extra_height)
 
     def sectionSizeFromContents(self, logicalIndex: int) -> QSize:
         size = super().sectionSizeFromContents(logicalIndex)
@@ -174,7 +185,8 @@ class FilterHeaderView(QHeaderView):
     def updateGeometries(self):
         super().updateGeometries()
         # Reserve space below the header labels for the filter row
-        self.setViewportMargins(0, 0, 0, self.FILTER_ROW_HEIGHT)
+        extra_height = self.FILTER_ROW_HEIGHT if self._filter_row_visible else 0
+        self.setViewportMargins(0, 0, 0, extra_height)
         self._position_editors()
 
     def _position_editors(self):
@@ -188,7 +200,7 @@ class FilterHeaderView(QHeaderView):
             x = self.sectionPosition(i) - self.offset()
             w = self.sectionSize(i)
             panel.setGeometry(x, y, w, self.FILTER_ROW_HEIGHT)
-            panel.setVisible(not self.isSectionHidden(i))
+            panel.setVisible(self._filter_row_visible and not self.isSectionHidden(i))
 
     # ------------------------------------------------------------------
     # Internal
@@ -196,19 +208,25 @@ class FilterHeaderView(QHeaderView):
 
     def mousePressEvent(self, event):
         """Route clicks in the label area to sorting, let filter row clicks pass through."""
-        label_height = self.sizeHint().height() - self.FILTER_ROW_HEIGHT
+        label_height = super().sizeHint().height()
+        if self._filter_row_visible:
+            label_height = self.sizeHint().height() - self.FILTER_ROW_HEIGHT
         if event.position().y() < label_height:
             # Check if a QLineEdit is stealing this click (shouldn't, but just in case)
             super().mousePressEvent(event)
         # Clicks in the filter row are handled by the QLineEdit widgets
 
     def mouseReleaseEvent(self, event):
-        label_height = self.sizeHint().height() - self.FILTER_ROW_HEIGHT
+        label_height = super().sizeHint().height()
+        if self._filter_row_visible:
+            label_height = self.sizeHint().height() - self.FILTER_ROW_HEIGHT
         if event.position().y() < label_height:
             super().mouseReleaseEvent(event)
 
     def mouseMoveEvent(self, event):
-        label_height = self.sizeHint().height() - self.FILTER_ROW_HEIGHT
+        label_height = super().sizeHint().height()
+        if self._filter_row_visible:
+            label_height = self.sizeHint().height() - self.FILTER_ROW_HEIGHT
         if event.position().y() < label_height:
             super().mouseMoveEvent(event)
 

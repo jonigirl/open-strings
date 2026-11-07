@@ -77,6 +77,17 @@ def test_filter_geometry_tracks_resize_and_move(header):
     assert header._controls[1].x() == header.sectionPosition(1) - header.offset()
 
 
+def test_filter_row_can_collapse_and_restore(header):
+    visible_height = header.sizeHint().height()
+    header.set_filter_row_visible(False)
+    assert not header._controls[1].isVisible()
+    assert header.sizeHint().height() < visible_height
+
+    header.set_filter_row_visible(True)
+    assert header._controls[1].isVisible()
+    assert header.sizeHint().height() == visible_height
+
+
 def test_filters_are_keyboard_accessible(header, qtbot):
     editor = header._filters[1]
     editor.setFocus()

@@ -25,6 +25,7 @@ def filter_entry_indices(
     favorites_only: bool,
     favorite_prefix: str,
     column_filter_modes: list[str] | None = None,
+    global_search: str = "",
 ) -> list[int]:
     """Return indices of entries that pass all active filters.
 
@@ -63,6 +64,8 @@ def filter_entry_indices(
         )
         active_col_filters = valid_col_filters
 
+    global_search = global_search.casefold().strip()
+
     # Pre-resolve each active column filter to a (value_getter, text) pair.
     # Built once per call, amortised over all ~87k entries: the per-entry loop
     # then calls only the getters for columns that are actually filtered rather
@@ -99,7 +102,12 @@ def filter_entry_indices(
             show = False
         elif favorites_only and not entry.custom_value.startswith(favorite_prefix):
             show = False
-        elif active_filter_fns:
+        elif global_search:
+            searchable = "\n".join(
+                (entry.key, default_values.get(entry.key, ""), entry.original_value, entry.custom_value)
+            ).casefold()
+            show = global_search in searchable
+        if show and active_filter_fns:
             for get_val, filter_text, mode in active_filter_fns:
                 value = get_val(entry)
                 if mode == "exact":

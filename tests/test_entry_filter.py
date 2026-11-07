@@ -159,6 +159,43 @@ def test_column_filter_by_default_values():
     assert result == [0]
 
 
+def test_global_search_matches_key_default_current_and_custom_values():
+    entries = [
+        _e("key-match", original_value="no match"),
+        _e("other", original_value="current match"),
+        _e("another", custom_value="custom match", status="Modified"),
+        _e("last", original_value="no match"),
+    ]
+    result = filter_entry_indices(
+        entries,
+        {"last": "default match"},
+        _no_filters(),
+        "All",
+        "All",
+        False,
+        False,
+        "★",
+        global_search="match",
+    )
+    assert result == [0, 1, 2, 3]
+
+
+def test_global_search_combines_with_category_filter():
+    entries = [_e("one", category="Ships"), _e("two", category="Gear")]
+    result = filter_entry_indices(
+        entries,
+        {},
+        _no_filters(),
+        "Ships",
+        "All",
+        False,
+        False,
+        "★",
+        global_search="one",
+    )
+    assert result == [0]
+
+
 def test_out_of_bounds_column_filter_skipped_with_warning(caplog):
     import logging
 

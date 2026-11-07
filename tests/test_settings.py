@@ -458,6 +458,23 @@ class TestFontPreference:
             qapp.setFont(previous_font)
 
 
+class TestViewMode:
+    def test_default_preserves_advanced_layout(self, isolated_qsettings):
+        assert AppSettings.get_view_mode() == AppSettings.VIEW_MODE_ADVANCED
+
+    def test_view_mode_roundtrip(self, isolated_qsettings):
+        AppSettings.set_view_mode(AppSettings.VIEW_MODE_BASIC)
+        assert AppSettings.get_view_mode() == AppSettings.VIEW_MODE_BASIC
+
+    def test_invalid_stored_mode_uses_advanced_default(self, isolated_qsettings):
+        AppSettings.settings().setValue(AppSettings.VIEW_MODE, "compact")
+        assert AppSettings.get_view_mode() == AppSettings.DEFAULT_VIEW_MODE
+
+    def test_invalid_mode_cannot_be_saved(self, isolated_qsettings):
+        with pytest.raises(ValueError, match="Unsupported view mode"):
+            AppSettings.set_view_mode("compact")
+
+
 class TestEnsureUserIni:
     def test_creates_empty_file_if_missing(self, isolated_qsettings, fake_user_data_dir):
         AppSettings.ensure_user_ini_file()

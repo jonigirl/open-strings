@@ -257,6 +257,10 @@ class AppSettings:
     FONT_ATKINSON = "atkinson"
     FONT_OPENDYSLEXIC = "opendyslexic"
     DEFAULT_FONT = FONT_ATKINSON
+    VIEW_MODE = "view_mode"
+    VIEW_MODE_BASIC = "basic"
+    VIEW_MODE_ADVANCED = "advanced"
+    DEFAULT_VIEW_MODE = VIEW_MODE_ADVANCED
 
     # Settings keys - Launcher menu heading
     SHOW_FRONTEND_VERSION_STAMP = "show_frontend_version_stamp"
@@ -397,6 +401,20 @@ class AppSettings:
     def set_font_preference(value: str) -> None:
         """Persist body font preference."""
         AppSettings.settings().setValue(AppSettings.FONT_PREFERENCE, value)
+        AppSettings.settings().sync()
+
+    @staticmethod
+    def get_view_mode() -> str:
+        value = AppSettings.settings().value(AppSettings.VIEW_MODE, AppSettings.DEFAULT_VIEW_MODE)
+        if value not in (AppSettings.VIEW_MODE_BASIC, AppSettings.VIEW_MODE_ADVANCED):
+            return AppSettings.DEFAULT_VIEW_MODE
+        return value
+
+    @staticmethod
+    def set_view_mode(value: str) -> None:
+        if value not in (AppSettings.VIEW_MODE_BASIC, AppSettings.VIEW_MODE_ADVANCED):
+            raise ValueError(f"Unsupported view mode: {value!r}")
+        AppSettings.settings().setValue(AppSettings.VIEW_MODE, value)
         AppSettings.settings().sync()
 
     @staticmethod

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QAbstractItemView,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDockWidget,
@@ -61,6 +62,29 @@ def create_toolbar(parent: MainWindow) -> QVBoxLayout:
 
     # ── Button row ────────────────────────────────────────────────────────
     button_layout = QHBoxLayout()
+
+    button_layout.addWidget(QLabel("View:"))
+    parent.view_mode_group = QButtonGroup(parent)
+    parent.basic_mode_btn = QPushButton("Basic")
+    parent.basic_mode_btn.setCheckable(True)
+    parent.basic_mode_btn.setAccessibleName("Basic view")
+    parent.basic_mode_btn.setToolTip("Show core search and editing controls")
+    parent.advanced_mode_btn = QPushButton("Advanced")
+    parent.advanced_mode_btn.setCheckable(True)
+    parent.advanced_mode_btn.setAccessibleName("Advanced view")
+    parent.advanced_mode_btn.setToolTip("Show all filters and less-used tools")
+    parent.view_mode_group.setExclusive(True)
+    parent.view_mode_group.addButton(parent.basic_mode_btn)
+    parent.view_mode_group.addButton(parent.advanced_mode_btn)
+    parent.basic_mode_btn.setChecked(AppSettings.get_view_mode() == AppSettings.VIEW_MODE_BASIC)
+    parent.advanced_mode_btn.setChecked(AppSettings.get_view_mode() == AppSettings.VIEW_MODE_ADVANCED)
+    parent.basic_mode_btn.clicked.connect(lambda _checked=False: parent.set_view_mode(AppSettings.VIEW_MODE_BASIC))
+    parent.advanced_mode_btn.clicked.connect(
+        lambda _checked=False: parent.set_view_mode(AppSettings.VIEW_MODE_ADVANCED)
+    )
+    button_layout.addWidget(parent.basic_mode_btn)
+    button_layout.addWidget(parent.advanced_mode_btn)
+    button_layout.addSpacing(8)
 
     parent.open_loc_dir_btn = QPushButton("Open Localization Dir")
     parent.open_loc_dir_btn.setStyleSheet(
@@ -143,11 +167,30 @@ def create_toolbar(parent: MainWindow) -> QVBoxLayout:
     parent.tutorial_btn.clicked.connect(parent._start_tutorial)
     button_layout.addWidget(parent.tutorial_btn)
 
+    parent._advanced_toolbar_buttons = [
+        parent.restore_backup_btn,
+        parent.clear_loc_btn,
+        parent.clear_cache_btn,
+        parent.export_locpack_btn,
+    ]
+
     button_layout.addStretch()
     layout.addLayout(button_layout)
 
     # ── Filter row ────────────────────────────────────────────────────────
     filter_layout = QHBoxLayout()
+
+    parent.basic_search_label = QLabel("Search:")
+    filter_layout.addWidget(parent.basic_search_label)
+    parent.basic_search_input = QLineEdit()
+    parent.basic_search_input.setPlaceholderText("Search keys and values…")
+    parent.basic_search_input.setAccessibleName("Search localization strings")
+    parent.basic_search_input.setToolTip("Search keys, default values, and your custom values")
+    parent.basic_search_input.setClearButtonEnabled(True)
+    parent.basic_search_input.setMinimumWidth(240)
+    parent.basic_search_input.textChanged.connect(parent.apply_filters)
+    filter_layout.addWidget(parent.basic_search_input, stretch=1)
+    filter_layout.addSpacing(8)
 
     filter_layout.addWidget(QLabel("Category:"))
     parent.category_combo = QComboBox()
@@ -159,7 +202,8 @@ def create_toolbar(parent: MainWindow) -> QVBoxLayout:
     parent.category_combo.currentTextChanged.connect(parent.apply_filters)
     filter_layout.addWidget(parent.category_combo)
 
-    filter_layout.addWidget(QLabel("Status:"))
+    parent.status_filter_label = QLabel("Status:")
+    filter_layout.addWidget(parent.status_filter_label)
     parent.status_combo = QComboBox()
     parent.status_combo.addItems(["All", "Modified", "Enhanced", "Unmodified", "New"])
     parent.status_combo.setMaximumWidth(120)
@@ -209,6 +253,16 @@ def create_toolbar(parent: MainWindow) -> QVBoxLayout:
     parent.copy_filtered_btn.clicked.connect(parent.copy_filtered_to_clipboard)
     filter_layout.addWidget(parent.copy_filtered_btn)
 
+    parent._advanced_filter_widgets = [
+        parent.status_filter_label,
+        parent.status_combo,
+        parent.hide_unmodified_check,
+        parent.favorites_only_check,
+        parent.grouped_sort_btn,
+        parent.clear_filters_btn,
+        parent.copy_filtered_btn,
+    ]
+
     filter_layout.addStretch()
     layout.addLayout(filter_layout)
 
@@ -226,7 +280,8 @@ def create_strings_tab(parent: MainWindow) -> QWidget:
 
     parent._model = StringTableModel(parent)
 
-    menu_heading_layout = QHBoxLayout()
+    parent.menu_heading_widget = QWidget(widget)
+    menu_heading_layout = QHBoxLayout(parent.menu_heading_widget)
     menu_heading_layout.addWidget(QLabel("Menu Heading:"))
 
     parent.menu_heading_input = QLineEdit()
@@ -253,7 +308,7 @@ def create_strings_tab(parent: MainWindow) -> QWidget:
     parent.show_frontend_stamp_check.toggled.connect(AppSettings.set_show_frontend_version_stamp)
     menu_heading_layout.addWidget(parent.show_frontend_stamp_check)
 
-    layout.addLayout(menu_heading_layout)
+    layout.addWidget(parent.menu_heading_widget)
 
     parent.table = QTableView()
     parent.table.setModel(parent._model)

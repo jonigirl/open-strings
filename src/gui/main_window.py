@@ -9,6 +9,7 @@ from PyQt6.QtCore import QModelIndex, Qt, QTimer, QUrl, pyqtSlot
 from PyQt6.QtGui import QDesktopServices, QFont, QIcon
 from PyQt6.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDockWidget,
@@ -34,6 +35,7 @@ from src.gui.enhancements_tab import EnhancementsTab
 from src.gui.filter_header import FilterHeaderView
 from src.gui.log_tab import LogTab
 from src.gui.string_table_model import (
+    COL_CURRENT,
     COL_CUSTOM,
     COL_STAR,
     StringTableModel,
@@ -76,6 +78,15 @@ class MainWindow(QMainWindow):
     status_combo: QComboBox
     hide_unmodified_check: QCheckBox
     favorites_only_check: QCheckBox
+    view_mode_group: QButtonGroup
+    basic_mode_btn: QPushButton
+    advanced_mode_btn: QPushButton
+    basic_search_label: QLabel
+    basic_search_input: QLineEdit
+    status_filter_label: QLabel
+    menu_heading_widget: QWidget
+    _advanced_toolbar_buttons: list[QPushButton]
+    _advanced_filter_widgets: list[QWidget]
     grouped_sort_btn: QPushButton
     clear_filters_btn: QPushButton
     copy_filtered_btn: QPushButton
@@ -103,6 +114,7 @@ class MainWindow(QMainWindow):
         # Data
         self.entries: list[StringEntry] = []
         self._entries_user_ini_path: Path | None = None
+        self._view_mode = AppSettings.get_view_mode()
         self.filtered_row_indices: list[int] = []  # noqa: F841  # kept for external compat
         self.default_values: dict[str, str] = {}  # Store default values from cached base source
 
@@ -269,6 +281,7 @@ class MainWindow(QMainWindow):
         # channel indicator). Order matches the original: spinner first so
         # it lands left-most in the permanent-widget zone.
         self.status_bar_mgr.install_widgets()
+        self._apply_view_mode(self._view_mode)
 
     def _on_tab_changed(self, new_index: int):
         """Revert unapplied enhancement checkbox changes when leaving the Enhancements tab."""
@@ -338,6 +351,8 @@ class MainWindow(QMainWindow):
             user_ini_path=AppSettings.get_user_ini_path(),
             show_frontend_version=AppSettings.get_show_frontend_version_stamp(),
             max_backups=_MAX_BACKUPS,
+            active_channel=AppSettings.get_active_channel(),
+            user_data_root=AppSettings.get_user_data_dir().resolve(),
         )
 
     @pyqtSlot(str)
@@ -1361,17 +1376,47 @@ class MainWindow(QMainWindow):
     @timed
     def _filtered_entry_indices(self) -> list[int]:
         """Return indices into self.entries for entries passing the current filters."""
+        basic_mode = self._view_mode == AppSettings.VIEW_MODE_BASIC
+        column_filters = self.filter_header.get_filter_texts()
+        column_filter_modes = self.filter_header.get_filter_modes()
+        if basic_mode:
+            column_filters = [""] * len(column_filters)
+            column_filter_modes = ["contains"] * len(column_filter_modes)
         return filter_entry_indices(
             entries=self.entries,
             default_values=self.default_values,
-            column_filters=self.filter_header.get_filter_texts(),
+            column_filters=column_filters,
             category_filter=self.category_combo.currentText(),
-            status_filter=self.status_combo.currentText(),
-            hide_unmodified=self.hide_unmodified_check.isChecked(),
-            favorites_only=self.favorites_only_check.isChecked(),
+            status_filter="All" if basic_mode else self.status_combo.currentText(),
+            hide_unmodified=False if basic_mode else self.hide_unmodified_check.isChecked(),
+            favorites_only=False if basic_mode else self.favorites_only_check.isChecked(),
             favorite_prefix=AppSettings.get_favorite_prefix(),
-            column_filter_modes=self.filter_header.get_filter_modes(),
+            column_filter_modes=column_filter_modes,
+            global_search=self.basic_search_input.text() if basic_mode else "",
         )
+
+    def set_view_mode(self, mode: str) -> None:
+        if mode not in (AppSettings.VIEW_MODE_BASIC, AppSettings.VIEW_MODE_ADVANCED):
+            return
+        AppSettings.set_view_mode(mode)
+        self._apply_view_mode(mode)
+        self.apply_filters()
+
+    def _apply_view_mode(self, mode: str) -> None:
+        basic = mode == AppSettings.VIEW_MODE_BASIC
+        self._view_mode = mode
+        self.basic_mode_btn.setChecked(basic)
+        self.advanced_mode_btn.setChecked(not basic)
+        for button in self._advanced_toolbar_buttons:
+            button.setVisible(not basic)
+        for widget in self._advanced_filter_widgets:
+            widget.setVisible(not basic)
+        self.basic_search_label.setVisible(basic)
+        self.basic_search_input.setVisible(basic)
+        self.filter_header.set_filter_row_visible(not basic)
+        self.menu_heading_widget.setVisible(not basic)
+        self.table.setColumnHidden(COL_CURRENT, basic)
+        self.table.setColumnHidden(COL_STAR, basic)
 
     @timed
     def update_category_combo(self):
@@ -1432,18 +1477,21 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def clear_filters(self):
         """Clear all filters."""
+        self.basic_search_input.blockSignals(True)
         self.category_combo.blockSignals(True)
         self.status_combo.blockSignals(True)
         self.hide_unmodified_check.blockSignals(True)
         self.favorites_only_check.blockSignals(True)
 
         self.filter_header.clear_all()
+        self.basic_search_input.clear()
         self.category_combo.setCurrentIndex(0)
         self.status_combo.setCurrentIndex(0)
         self.hide_unmodified_check.setChecked(False)
         self.favorites_only_check.setChecked(False)
 
         self.category_combo.blockSignals(False)
+        self.basic_search_input.blockSignals(False)
         self.status_combo.blockSignals(False)
         self.hide_unmodified_check.blockSignals(False)
         self.favorites_only_check.blockSignals(False)
