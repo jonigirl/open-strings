@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QTextCharFormat, QTextCursor
+from PyQt6.QtGui import QFont, QTextCharFormat, QTextCursor
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -23,15 +23,6 @@ from PyQt6.QtWidgets import (
 # Maximum lines kept in the viewer before oldest lines are dropped
 _MAX_LINES = 2000
 _POPOUT_SIZE = (960, 600)
-
-# Colours per level
-_LEVEL_COLORS = {
-    logging.DEBUG: "#888888",
-    logging.INFO: "#cccccc",
-    logging.WARNING: "#ff9800",
-    logging.ERROR: "#f44336",
-    logging.CRITICAL: "#f44336",
-}
 
 _LEVEL_NAMES = {
     logging.DEBUG: "DEBUG",
@@ -152,9 +143,8 @@ class LogTab(QWidget):
         self._view = QPlainTextEdit()
         self._view.setReadOnly(True)
         self._view.setMaximumBlockCount(_MAX_LINES)
-        self._view.setFont(QFont("Consolas", 11))
         self._view.setAccessibleName("Application log")
-        self._view.setStyleSheet("QPlainTextEdit { background: #1e1e1e; color: #cccccc; border: none; }")
+        self._view.setStyleSheet("QPlainTextEdit { border: none; }")
         # Disable the default word-wrap so long lines scroll horizontally
         self._view.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         layout.addWidget(self._view)
@@ -217,11 +207,9 @@ class LogTab(QWidget):
             self._handler.setLevel(level)
 
     def _append_record(self, msg: str, levelno: int):
-        color = _LEVEL_COLORS.get(levelno, "#cccccc")
         bold = levelno >= logging.ERROR
 
         fmt = QTextCharFormat()
-        fmt.setForeground(QColor(color))
         if bold:
             fmt.setFontWeight(QFont.Weight.Bold)
 

@@ -53,6 +53,9 @@ def _stamp_frontend_version(merged: dict, *, enabled: bool = True) -> dict:
 
 def _render_preview_html(key: str, raw: str) -> str:
     """Render *raw* loc-string value as styled HTML for the preview pane."""
+    from src.gui.theme import get_body_font_family
+
+    font_family = _html_mod.escape(get_body_font_family())
     if not raw:
         body = "<em style='color:#888;'>(empty)</em>"
     else:
@@ -76,8 +79,8 @@ def _render_preview_html(key: str, raw: str) -> str:
         body = escaped
 
     return (
-        '<div style="font-family:Atkinson Hyperlegible,Arial,sans-serif;font-size:10pt;line-height:1.45;">'
-        f'<div style="color:#888;font-size:8pt;margin-bottom:8px;'
+        f'<div style="font-family:{font_family},Arial,sans-serif;font-size:12pt;line-height:1.65;">'
+        f'<div style="color:#888;font-size:10pt;margin-bottom:8px;'
         f'font-family:Consolas,monospace;">{_html_mod.escape(key)}</div>'
         "<br>"
         f"{body}"

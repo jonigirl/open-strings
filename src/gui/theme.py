@@ -69,24 +69,26 @@ def load_application_fonts() -> None:
 SYSTEM_FONT_FAMILY = "Segoe UI"
 
 
-def apply_body_font(preference: str = "segoe") -> None:
+def get_body_font_family(preference: str | None = None) -> str:
+    if preference is None:
+        from src.utils.settings import AppSettings
+
+        preference = AppSettings.get_font_preference()
+    return {
+        "opendyslexic": BODY_FONT_OD,
+        "atkinson": BODY_FONT_FAMILY,
+        "segoe": SYSTEM_FONT_FAMILY,
+    }.get(preference, BODY_FONT_FAMILY)
+
+
+def apply_body_font(preference: str = "atkinson") -> None:
     """Set the application-wide body font. Call after load_application_fonts()."""
     from PyQt6.QtGui import QFont
     from PyQt6.QtWidgets import QApplication
 
-    if preference == "opendyslexic":
-        family = BODY_FONT_OD
-        size = 11
-    elif preference == "atkinson":
-        family = BODY_FONT_FAMILY
-        size = 11
-    else:
-        family = SYSTEM_FONT_FAMILY
-        size = 10
-
     app = QApplication.instance()
     if isinstance(app, QApplication):
-        font = QFont(family, size)
+        font = QFont(get_body_font_family(preference), 12)
         app.setFont(font)
 
 

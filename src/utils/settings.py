@@ -256,7 +256,7 @@ class AppSettings:
     FONT_SEGOE = "segoe"
     FONT_ATKINSON = "atkinson"
     FONT_OPENDYSLEXIC = "opendyslexic"
-    DEFAULT_FONT = FONT_SEGOE
+    DEFAULT_FONT = FONT_ATKINSON
 
     # Settings keys - Launcher menu heading
     SHOW_FRONTEND_VERSION_STAMP = "show_frontend_version_stamp"

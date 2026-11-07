@@ -185,6 +185,16 @@ class TestMarkdownToHtml:
         result = markdown_to_html("hello")
         assert "Atkinson Hyperlegible" in result
 
+        def test_selected_font_and_readable_body_size_are_used(self, monkeypatch):
+            from src.utils.settings import AppSettings
+
+            monkeypatch.setattr(AppSettings, "get_font_preference", staticmethod(lambda: AppSettings.FONT_OPENDYSLEXIC))
+
+            result = markdown_to_html("# Heading")
+
+            assert "font-family: OpenDyslexic" in result
+            assert "font-size: 16px" in result
+
     def test_empty_string(self):
         result = markdown_to_html("")
         assert "<html>" in result

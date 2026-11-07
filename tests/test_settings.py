@@ -410,8 +410,8 @@ class TestSourceAutoUpdate:
 
 
 class TestFontPreference:
-    def test_default_is_segoe(self, isolated_qsettings):
-        assert AppSettings.get_font_preference() == AppSettings.FONT_SEGOE
+    def test_default_is_atkinson(self, isolated_qsettings):
+        assert AppSettings.get_font_preference() == AppSettings.FONT_ATKINSON
 
     def test_roundtrip_atkinson(self, isolated_qsettings):
         AppSettings.set_font_preference(AppSettings.FONT_ATKINSON)
@@ -424,6 +424,38 @@ class TestFontPreference:
     def test_invalid_stored_value_returns_default(self, isolated_qsettings):
         AppSettings.settings().setValue(AppSettings.FONT_PREFERENCE, "comic_sans")
         assert AppSettings.get_font_preference() == AppSettings.DEFAULT_FONT
+
+    def test_selecting_segoe_restores_and_applies_system_font(self, isolated_qsettings, monkeypatch, qtbot):
+        from unittest.mock import Mock
+
+        from src.gui import theme
+        from src.gui.config_tab import ConfigTab
+
+        AppSettings.set_font_preference(AppSettings.FONT_ATKINSON)
+        apply_body_font = Mock()
+        monkeypatch.setattr(theme, "apply_body_font", apply_body_font)
+        tab = ConfigTab()
+        qtbot.addWidget(tab)
+
+        tab.font_combo.setCurrentIndex(tab.font_combo.findData(AppSettings.FONT_SEGOE))
+        qtbot.waitUntil(lambda: apply_body_font.called)
+
+        assert AppSettings.get_font_preference() == AppSettings.FONT_SEGOE
+        apply_body_font.assert_called_once_with(AppSettings.FONT_SEGOE)
+
+    @pytest.mark.parametrize(
+        "preference",
+        [AppSettings.FONT_SEGOE, AppSettings.FONT_ATKINSON, AppSettings.FONT_OPENDYSLEXIC],
+    )
+    def test_body_font_uses_readable_point_size(self, qapp, preference):
+        from src.gui.theme import apply_body_font
+
+        previous_font = qapp.font()
+        try:
+            apply_body_font(preference)
+            assert qapp.font().pointSize() == 12
+        finally:
+            qapp.setFont(previous_font)
 
 
 class TestEnsureUserIni:

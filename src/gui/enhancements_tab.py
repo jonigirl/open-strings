@@ -38,14 +38,13 @@ class EnhancementsTab(QWidget):
         layout.setSpacing(12)
 
         title = QLabel("Enhancements")
-        title.setStyleSheet("font-weight: bold; font-size: 14px;")
+        title.setStyleSheet("font-weight: bold; font-size: 16px;")
         layout.addWidget(title)
 
         desc = QLabel(
             "Optional features that extend the base localization data. Each can be enabled or disabled independently."
         )
         desc.setProperty("role", "secondary")
-        desc.setStyleSheet("font-size: 11px;")
         desc.setWordWrap(True)
         layout.addWidget(desc)
 
@@ -65,7 +64,6 @@ class EnhancementsTab(QWidget):
             "Stats for items added in the latest patch may be incomplete until an app update is available."
         )
         enhancements_desc.setProperty("role", "secondary")
-        enhancements_desc.setStyleSheet("font-size: 11px;")
         enhancements_desc.setWordWrap(True)
         gl.addWidget(enhancements_desc)
 
@@ -88,19 +86,20 @@ class EnhancementsTab(QWidget):
             row = QHBoxLayout()
             cb = QCheckBox(label)
             cb.setChecked(AppSettings.get_enhancement_category_enabled(key))
-            cb.setStyleSheet("font-size: 11px;")
             cb.toggled.connect(self._on_category_checkbox_changed)
             row.addWidget(cb)
             self._enhancements_checkboxes[key] = cb
 
-            dot = QLabel("●")
-            dot.setStyleSheet("color: #999; font-size: 12px;")
+            dot = QLabel("Missing")
+            dot.setMinimumWidth(58)
+            dot.setAccessibleName(f"{label} enhancement files status")
+            dot.setProperty("role", "secondary")
+            dot.setStyleSheet("color: #999;")
             row.addWidget(dot)
             self._enhancements_status_labels[key] = dot
 
             desc = QLabel(_CATEGORY_DESCRIPTIONS.get(key, ""))
             desc.setProperty("role", "secondary")
-            desc.setStyleSheet("font-size: 10px;")
             row.addWidget(desc)
 
             row.addStretch()
@@ -132,7 +131,6 @@ class EnhancementsTab(QWidget):
 
         self._forge_status_label = QLabel()
         self._forge_status_label.setProperty("role", "secondary")
-        self._forge_status_label.setStyleSheet("font-size: 10px;")
         gl.addWidget(self._forge_status_label)
 
         self._operation_label = QLabel()
@@ -206,7 +204,6 @@ class EnhancementsTab(QWidget):
             "sort to the top of the in-game ship list. Choose which character to use:"
         )
         favorites_desc.setProperty("role", "secondary")
-        favorites_desc.setStyleSheet("font-size: 11px;")
         favorites_desc.setWordWrap(True)
         gl.addWidget(favorites_desc)
 
@@ -304,7 +301,14 @@ class EnhancementsTab(QWidget):
             # Check all files controlled by this checkbox
             filenames = self._files_for_category(key)
             all_present = all((cache_dir / fn).exists() for fn in filenames)
-            dot.setStyleSheet(f"color: {'#4caf50' if all_present else '#f44336'}; font-size: 12px;")
+            enabled = AppSettings.get_enhancement_category_enabled(key)
+            status, color = (
+                ("Off", "#777") if not enabled else (("Ready", "#4caf50") if all_present else ("Missing", "#f44336"))
+            )
+            dot.setText(status)
+            dot.setToolTip(f"{self._enhancements_checkboxes[key].text()} enhancement files: {status.lower()}")
+            dot.setAccessibleDescription(f"Enhancement files {status.lower()}")
+            dot.setStyleSheet(f"color: {color};")
         self.refresh_forge_status()
 
     def refresh_forge_status(self):
@@ -315,7 +319,7 @@ class EnhancementsTab(QWidget):
         p4k_path = AppSettings.get_p4k_path()
         if not (forge_dir / ".p4k_mtime").exists():
             self._forge_status_label.setText("DataForge: not yet extracted — click 'Generate Enhancements' to begin")
-            self._forge_status_label.setStyleSheet("font-size: 10px; color: #f44336;")
+            self._forge_status_label.setStyleSheet("color: #f44336;")
         elif p4k_path.exists() and not dataforge_cache_is_fresh(
             p4k_path,
             forge_dir,
@@ -325,7 +329,7 @@ class EnhancementsTab(QWidget):
             self._forge_status_label.setText(
                 "DataForge: cache outdated — click 'Generate Enhancements' to re-extract and update"
             )
-            self._forge_status_label.setStyleSheet("font-size: 10px; color: #ff9800;")
+            self._forge_status_label.setStyleSheet("color: #ff9800;")
         elif p4k_path.exists() and not dataforge_cache_is_fresh(
             p4k_path,
             forge_dir,
@@ -334,7 +338,7 @@ class EnhancementsTab(QWidget):
             _resolve_patches_dir(),
         ):
             self._forge_status_label.setText("DataForge: patches changed — click 'Generate Enhancements' to refresh")
-            self._forge_status_label.setStyleSheet("font-size: 10px; color: #ff9800;")
+            self._forge_status_label.setStyleSheet("color: #ff9800;")
         else:
             self._forge_status_label.setText("DataForge: cache up to date ✓")
-            self._forge_status_label.setStyleSheet("font-size: 10px; color: #4caf50;")
+            self._forge_status_label.setStyleSheet("color: #4caf50;")

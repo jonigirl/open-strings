@@ -53,7 +53,7 @@ class ConfigTab(QWidget):
         layout.setSpacing(12)
 
         title = QLabel("Configuration")
-        title.setStyleSheet("font-weight: bold; font-size: 14px;")
+        title.setStyleSheet("font-weight: bold; font-size: 16px;")
         layout.addWidget(title)
 
         instructions = QLabel(
@@ -61,7 +61,6 @@ class ConfigTab(QWidget):
             "from Data.p4k, and import external INI files to customize your strings."
         )
         instructions.setProperty("role", "secondary")
-        instructions.setStyleSheet("font-size: 11px;")
         instructions.setWordWrap(True)
         layout.addWidget(instructions)
 
@@ -113,7 +112,7 @@ class ConfigTab(QWidget):
             "Path to your Star Citizen install root (the directory containing LIVE, PTU, EPTU, HOTFIX, TECH-PREVIEW)."
         )
         game_desc.setProperty("role", "secondary")
-        game_desc.setStyleSheet("font-size: 11px; margin-bottom: 5px;")
+        game_desc.setStyleSheet("margin-bottom: 5px;")
         game_desc.setWordWrap(True)
         game_layout.addWidget(game_desc)
 
@@ -140,7 +139,6 @@ class ConfigTab(QWidget):
         # ── Channel selector (LIVE / PTU / EPTU / HOTFIX / TECH-PREVIEW) ───
         channel_row = QHBoxLayout()
         channel_label = QLabel("Channel:")
-        channel_label.setStyleSheet("font-size: 11px;")
         channel_row.addWidget(channel_label)
 
         self.channel_combo = QComboBox()
@@ -154,7 +152,6 @@ class ConfigTab(QWidget):
 
         self._channel_hint_label = QLabel()
         self._channel_hint_label.setProperty("role", "secondary")
-        self._channel_hint_label.setStyleSheet("font-size: 10px;")
         channel_row.addWidget(self._channel_hint_label)
         channel_row.addStretch()
         game_layout.addLayout(channel_row)
@@ -175,7 +172,7 @@ class ConfigTab(QWidget):
             "or cache cleanup fails."
         )
         data_desc.setProperty("role", "secondary")
-        data_desc.setStyleSheet("font-size: 11px; margin-bottom: 5px;")
+        data_desc.setStyleSheet("margin-bottom: 5px;")
         data_desc.setWordWrap(True)
         data_layout.addWidget(data_desc)
 
@@ -211,7 +208,6 @@ class ConfigTab(QWidget):
             "that always match your installed version."
         )
         p4k_desc.setProperty("role", "secondary")
-        p4k_desc.setStyleSheet("font-size: 11px;")
         p4k_desc.setWordWrap(True)
         p4k_layout.addWidget(p4k_desc)
 
@@ -222,7 +218,6 @@ class ConfigTab(QWidget):
 
         self._p4k_status_label = QLabel()
         self._p4k_status_label.setProperty("role", "secondary")
-        self._p4k_status_label.setStyleSheet("font-size: 11px;")
         p4k_status_row.addWidget(self._p4k_status_label)
         p4k_status_row.addStretch()
 
@@ -245,7 +240,6 @@ class ConfigTab(QWidget):
             "Keys are validated against base.ini, and conflicts are resolved interactively."
         )
         tools_desc.setProperty("role", "secondary")
-        tools_desc.setStyleSheet("font-size: 11px;")
         tools_desc.setWordWrap(True)
         tools_layout.addWidget(tools_desc)
 
@@ -271,12 +265,18 @@ class ConfigTab(QWidget):
 
     def _on_font_changed(self, _index: int) -> None:
         pref = self.font_combo.currentData()
-        if pref not in (AppSettings.FONT_ATKINSON, AppSettings.FONT_OPENDYSLEXIC):
+        if pref not in (AppSettings.FONT_SEGOE, AppSettings.FONT_ATKINSON, AppSettings.FONT_OPENDYSLEXIC):
             return
         AppSettings.set_font_preference(pref)
         from src.gui.theme import apply_body_font
 
-        QTimer.singleShot(0, lambda: apply_body_font(pref))
+        def apply_font() -> None:
+            apply_body_font(pref)
+            refresh = getattr(self.window(), "refresh_action_buttons", None)
+            if callable(refresh):
+                refresh()
+
+        QTimer.singleShot(0, apply_font)
 
     def _on_theme_changed(self, _index: int):
         """Defer the actual swap to the next event-loop tick. Running
@@ -431,7 +431,7 @@ class ConfigTab(QWidget):
             # a hint label so the user knows why things might not work.
             if root and active not in available_lookup:
                 self._channel_hint_label.setText(f"⚠ {active} isn't installed under this root — pick another channel")
-                self._channel_hint_label.setStyleSheet("font-size: 10px; color: #ff9800;")
+                self._channel_hint_label.setStyleSheet("color: #ff9800;")
             else:
                 self._channel_hint_label.setText("")
         finally:

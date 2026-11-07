@@ -79,6 +79,7 @@ def markdown_to_html(
     text_color: str = "#000000",
     base_color: str = "#ffffff",
     link_color: str = "#0078d7",
+    font_family: str | None = None,
 ) -> str:
     """Convert Markdown to styled HTML.
 
@@ -91,10 +92,15 @@ def markdown_to_html(
     Returns:
         Full HTML document string.
     """
+    if font_family is None:
+        from src.gui.theme import get_body_font_family
+
+        font_family = get_body_font_family()
+
     html = "<html><head><style>"
     html += (
-        f"body {{ font-family: Atkinson Hyperlegible, Arial, sans-serif; line-height: 1.8; "
-        f"padding: 20px; font-size: 15px; color: {text_color}; "
+        f"body {{ font-family: {font_family}, Arial, sans-serif; line-height: 1.8; "
+        f"padding: 20px; font-size: 16px; color: {text_color}; "
         f"background-color: {base_color}; }}"
     )
     html += (
@@ -106,8 +112,8 @@ def markdown_to_html(
         f"padding-bottom: 5px; margin-top: 30px; font-size: 24px; font-weight: bold; }}"
     )
     html += f"h3 {{ color: {link_color}; margin-top: 20px; font-size: 20px; font-weight: bold; }}"
-    html += f"p {{ font-size: 15px; margin: 10px 0; color: {text_color}; }}"
-    html += f"li {{ font-size: 15px; margin: 5px 0; color: {text_color}; }}"
+    html += f"p {{ font-size: 16px; margin: 10px 0; color: {text_color}; }}"
+    html += f"li {{ font-size: 16px; margin: 5px 0; color: {text_color}; }}"
     html += f"a {{ color: {link_color}; text-decoration: underline; font-weight: 500; }}"
     html += "a:hover { text-decoration: underline; opacity: 0.8; cursor: pointer; }"
     html += (
@@ -118,10 +124,10 @@ def markdown_to_html(
         "pre { background-color: rgba(0,0,0,0.05); padding: 10px; "
         "border-radius: 5px; overflow-x: auto; font-size: 14px; }"
     )
-    html += "ul { margin-left: 20px; font-size: 15px; }"
-    html += "ol { margin-left: 20px; font-size: 15px; }"
+    html += "ul { margin-left: 20px; font-size: 16px; }"
+    html += "ol { margin-left: 20px; font-size: 16px; }"
     html += "strong { font-weight: bold; }"
-    html += f"blockquote {{ border-left: 4px solid {link_color}; padding-left: 15px; font-style: italic; font-size: 15px; }}"
+    html += f"blockquote {{ border-left: 4px solid {link_color}; padding-left: 15px; font-style: italic; font-size: 16px; }}"
     html += "</style></head><body>"
 
     lines = markdown_text.split("\n")

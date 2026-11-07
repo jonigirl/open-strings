@@ -265,7 +265,6 @@ class StartupFlowManager(QObject):
             "DataForge data will be extracted automatically if not already cached.\nFirst run takes ~5-10 minutes."
         )
         info.setProperty("role", "secondary")
-        info.setStyleSheet("font-size: 11px;")
         info.setWordWrap(True)
         layout.addWidget(info)
 

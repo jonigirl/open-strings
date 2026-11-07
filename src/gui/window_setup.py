@@ -434,4 +434,4 @@ def render_help_html(parent: MainWindow) -> None:
 def apply_branding_styles(parent: MainWindow) -> None:
     """Apply per-theme colours to the title and tagline header labels."""
     parent.title_label.setStyleSheet(f"color: {get_title_color()};")
-    parent.tagline_label.setStyleSheet(f"font-size: 11px; letter-spacing: 2px; color: {get_tagline_color()};")
+    parent.tagline_label.setStyleSheet(f"font-size: 14px; color: {get_tagline_color()};")

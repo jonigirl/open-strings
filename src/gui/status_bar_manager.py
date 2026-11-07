@@ -98,7 +98,7 @@ class StatusBarManager:
         if self._app_version_indicator is not None:
             return
         label = QLabel(f"v{get_version()}")
-        label.setStyleSheet("font-size: 11px; padding: 2px 8px;")
+        label.setStyleSheet("padding: 2px 8px;")
         self._status_bar().addPermanentWidget(label)
         self._app_version_indicator = label
 
@@ -107,7 +107,7 @@ class StatusBarManager:
         if self._channel_indicator is not None:
             return
         label = QLabel()
-        label.setStyleSheet("font-size: 11px; font-weight: bold; padding: 2px 8px;")
+        label.setStyleSheet("font-weight: bold; padding: 2px 8px;")
         self._status_bar().addPermanentWidget(label)
         self._channel_indicator = label
         self.refresh_channel_indicator()

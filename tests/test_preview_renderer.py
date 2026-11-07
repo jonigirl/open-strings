@@ -56,3 +56,14 @@ class TestRenderPreviewHtml:
         html = _render_preview_html("k", "text")
         assert html.startswith("<div")
         assert "font-family" in html
+
+        def test_preview_uses_selected_accessible_font_and_body_size(self, monkeypatch):
+            from src.utils.settings import AppSettings
+
+            monkeypatch.setattr(AppSettings, "get_font_preference", staticmethod(lambda: AppSettings.FONT_OPENDYSLEXIC))
+
+            html = _render_preview_html("k", "text")
+
+            assert "font-family: OpenDyslexic" in html
+            assert "font-size: 12pt" in html
+            assert "line-height: 1.65" in html

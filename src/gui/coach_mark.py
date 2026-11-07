@@ -100,9 +100,9 @@ class CoachMarkOverlay(QWidget):
             }
             QFrame#coachCallout QLabel { background: transparent; }
             QFrame#coachCallout #coachTitle { font-size: 15px; font-weight: bold; }
-            QFrame#coachCallout #coachDesc  { font-size: 13px; }
+            QFrame#coachCallout #coachDesc  { font-size: 14px; }
             QFrame#coachCallout #coachCounter {
-                color: palette(mid); font-size: 11px;
+                color: palette(mid); font-size: 14px;
             }
             """
         )
