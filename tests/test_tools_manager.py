@@ -168,9 +168,9 @@ class TestDownloadTools:
         monkeypatch.setattr(tools, "get_tools_dir", lambda: tmp_path / "cache")
         monkeypatch.setattr(tools, "get_bundled_unforge_package", lambda: package)
         monkeypatch.setattr(tools, "_UNFORGE_SHA256", hashlib.sha256(payload).hexdigest())
-        with patch(
-            "urllib.request.urlopen", return_value=_FakeResponse(_make_zip(("unp4k.exe", "official")))
-        ) as download:
+        unp4k_zip = _make_zip(("unp4k.exe", "official"))
+        monkeypatch.setattr(tools, "_UNP4K_SHA256", hashlib.sha256(unp4k_zip).hexdigest())
+        with patch("urllib.request.urlopen", return_value=_FakeResponse(unp4k_zip)) as download:
             download_tools()
         download.assert_called_once()
         assert download.call_args.args[0] == tools._UNP4K_ZIP_URL
@@ -214,6 +214,7 @@ class TestDownloadTools:
 
         stack = ExitStack()
         stack.enter_context(patch("urllib.request.urlopen", side_effect=fake_urlopen))
+        stack.enter_context(patch("src.utils.tools_manager._UNP4K_SHA256", hashlib.sha256(responses[0]).hexdigest()))
         if len(responses) > 1:
             stack.enter_context(
                 patch("src.utils.tools_manager._UNFORGE_SHA256", hashlib.sha256(responses[1]).hexdigest())
@@ -317,6 +318,17 @@ class TestDownloadTools:
             with pytest.raises(RuntimeError, match="SHA-256 mismatch"):
                 download_tools()
         assert not (tmp_path / "unforge.cli.exe").exists()
+
+    def test_corrupt_unp4k_package_rejected_before_extraction(self, tmp_path):
+        unp4k_zip = _make_zip(("unp4k.exe", "tampered"))
+        with (
+            patch("src.utils.tools_manager.get_tools_dir", return_value=tmp_path),
+            self._patch_urlopen([unp4k_zip]),
+            patch("src.utils.tools_manager._UNP4K_SHA256", "0" * 64),
+        ):
+            with pytest.raises(RuntimeError, match="unp4k package SHA-256 mismatch"):
+                download_tools()
+        assert not (tmp_path / "unp4k.exe").exists()
 
 
 @pytest.mark.unit

@@ -301,6 +301,38 @@ begin
   end;
 end;
 
+procedure DeleteUserEdits(UserDataDir: String);
+var
+  Channels: array[0..4] of String;
+  i: Integer;
+  ChannelDir: String;
+begin
+  { The data folder may be an existing folder shared with unrelated files,
+    so remove only what Open Strings creates inside each channel subfolder. }
+  Channels[0] := 'LIVE';
+  Channels[1] := 'PTU';
+  Channels[2] := 'EPTU';
+  Channels[3] := 'HOTFIX';
+  Channels[4] := 'TECH-PREVIEW';
+  for i := 0 to 4 do
+  begin
+    ChannelDir := UserDataDir + '\' + Channels[i];
+    if DirExists(ChannelDir) then
+    begin
+      DeleteFile(ChannelDir + '\user.ini');
+      DeleteFile(ChannelDir + '\overrides.ini');
+      if DirExists(ChannelDir + '\backups') then
+        DelTree(ChannelDir + '\backups', True, True, True);
+      if DirExists(ChannelDir + '\cache') then
+        DelTree(ChannelDir + '\cache', True, True, True);
+      if not RemoveDir(ChannelDir) then
+        Log('Kept channel folder (contains other files): ' + ChannelDir);
+    end;
+  end;
+  if not RemoveDir(UserDataDir) then
+    Log('Kept data folder (contains other files): ' + UserDataDir);
+end;
+
 procedure CleanCachedData();
 var
   UserDataDir, LegacyCache: String;
@@ -698,8 +730,8 @@ begin
       UserDataDir := GetDocumentsDir();
       if DirExists(UserDataDir) then
       begin
-        Log('Deleting user data directory: ' + UserDataDir);
-        DelTree(UserDataDir, True, True, True);
+        Log('Deleting Open Strings edits and backups from: ' + UserDataDir);
+        DeleteUserEdits(UserDataDir);
       end
       else
         Log('User data directory not found (nothing to delete): ' + UserDataDir);

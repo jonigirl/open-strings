@@ -20,6 +20,8 @@ BUNDLED_UNFORGE_ASSET = f"unforge-openstrings-{TOOLS_VERSION}-win-x64.zip"
 _UNP4K_VERSION = "v4.0.87"
 _CUSTOM_TOOL_RELEASE = "v1.5.2"
 _UNFORGE_SHA256 = "5c0674c725b92ed75f5babc0e77f5d7dfe6ed24a60ee6bf1b2b5bbe1ff703748"
+# GitHub-published digest for unp4k-win-x64-v4.0.87.zip.
+_UNP4K_SHA256 = "7c2b9f0f8a985c8f3e8dac07d6521f477757cf3f2bbb4cb0bdad5980e63fdfc0"
 
 _BASE_URL = f"https://github.com/dolkensp/unp4k/releases/download/{_UNP4K_VERSION}"
 _UNP4K_ZIP_URL = f"{_BASE_URL}/unp4k-win-x64-{_UNP4K_VERSION}.zip"
@@ -79,9 +81,9 @@ def download_tools(
     _CHUNK = 65536
 
     # (label, zip_url, actual_exe_name) — unforge ships as unforge.cli.exe, not unforge.exe
-    for name, url, exe_name in [
-        ("unp4k", _UNP4K_ZIP_URL, "unp4k.exe"),
-        ("unforge", _UNFORGE_ZIP_URL, "unforge.cli.exe"),
+    for name, url, exe_name, expected_sha256 in [
+        ("unp4k", _UNP4K_ZIP_URL, "unp4k.exe", _UNP4K_SHA256),
+        ("unforge", _UNFORGE_ZIP_URL, "unforge.cli.exe", _UNFORGE_SHA256),
     ]:
         if cancel_event and cancel_event.is_set():
             raise RuntimeError("Download cancelled")
@@ -134,11 +136,10 @@ def download_tools(
                         else:
                             _report(progress_callback, f"Downloading {name}… {mb_done} MB")
 
-            if name == "unforge":
-                with tmp_path.open("rb") as archive:
-                    digest = hashlib.file_digest(archive, "sha256").hexdigest()
-                if digest != _UNFORGE_SHA256:
-                    raise RuntimeError("Patched unforge package SHA-256 mismatch; refusing extraction")
+            with tmp_path.open("rb") as archive:
+                digest = hashlib.file_digest(archive, "sha256").hexdigest()
+            if digest != expected_sha256:
+                raise RuntimeError(f"Downloaded {name} package SHA-256 mismatch; refusing extraction")
 
             _report(progress_callback, f"Extracting {name}…")
             logger.info(f"Extracting {name} to {tools_dir}")
