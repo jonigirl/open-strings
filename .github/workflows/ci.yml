@@ -32,13 +32,13 @@ jobs:
         run: uv sync --locked --all-groups
 
       - name: Ruff lint
-        run: uv run ruff check src/
+        run: uv run ruff check .
 
       - name: Ruff format check
-        run: uv run ruff format --check src/
+        run: uv run ruff format --check .
 
       - name: Mypy
-        run: uv run python -m mypy src/
+        run: uv run python -m mypy src/ scripts/generate_enhancements_ini.py
 
   # Tests must run on Windows — this is a Windows-only app (Star Citizen,
   # PyQt6 display, QSettings registry, Windows path conventions).

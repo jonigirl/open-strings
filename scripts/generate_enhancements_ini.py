@@ -31,6 +31,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 
 from src.utils import enhancement_formatters as _enh_formatters
 from src.utils.dataforge_diff import _build_snapshot
@@ -281,13 +282,13 @@ def _run_jobs_with_retry(
     jobs: dict[str, Callable],
     max_workers: int,
     thread_name_prefix: str,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """Run *jobs* concurrently, retrying any job serially once if it fails.
 
     SystemError and MemoryError are retried after the pool drains. Their cause
     is not assumed; native process crashes cannot be recovered by this retry.
     """
-    results: dict[str, object] = {}
+    results: dict[str, Any] = {}
     failed_names: list[str] = []
     with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix=thread_name_prefix) as pool:
         futures = {name: pool.submit(fn) for name, fn in jobs.items()}
@@ -479,7 +480,7 @@ _ITEM_TYPE_ABBREV: dict[str, str] = {
 
 
 def _record_tag_fallback(
-    fallbacks: dict[str, dict[str, dict[str, object]]],
+    fallbacks: dict[str, dict[str, dict[str, Any]]],
     kind: str,
     value: str,
     token: str,
