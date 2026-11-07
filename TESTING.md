@@ -132,7 +132,10 @@ uv run pytest tests/ --tb=short
    "Cancelling…" and closes once the download stops.
 9. Select each body font, including Segoe UI, and confirm the selection takes effect and persists after restart. Check the enhancements category states are readable as Ready, Missing, or Off without relying on color.
 10. Restore a backup from the active channel. Confirm the current `global.ini` is backed up first and an unrelated INI file cannot be selected as a backup.
-11. Resize the window and test at common Windows display-scaling settings. Confirm Config and Enhancements content remains reachable and text is legible.
+11. Apply to Game and confirm its progress dialog stays responsive. If an enabled source is missing, decline the warning and confirm no game file is written.
+12. Close the app during a long background operation. If the worker has not stopped after the wait timeout, confirm the app remains open and can be closed after the task finishes.
+13. Resize the window and test at common Windows display-scaling settings. Confirm Config and Enhancements content remains reachable and text is legible.
+14. Switch between Basic and Advanced. In Basic, search keys and values, filter by category, edit a row and Apply. Clear Filters resets search and category. In Advanced, confirm all per-column filters and secondary actions return; restart and verify the chosen view persists.
 
 Repeat the generation checks on LIVE separately. Each channel has its own cache
 and requires its own first-run rebuild. Do not apply to the game during initial

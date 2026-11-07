@@ -27,6 +27,7 @@ When extraction finishes, the extracted `base.ini` is loaded into the table auto
 - **Current Value** — the effective value before your override (base + any imported INI layers).
 - **Custom Value** — your personal edit. Saved automatically on every change and persisted to `<data folder>\<channel>\user.ini` (the data folder defaults to `Documents\Open Strings`; each Star Citizen channel — LIVE, PTU, EPTU, HOTFIX, TECH-PREVIEW — has its own isolated overrides).
 - Edits are highlighted with a **Modified** status (green).
+- Choose **Basic** for global search, category selection, table editing and Apply to Game. Choose **Advanced** to show the full filter controls and less-used actions. The selected view is remembered.
 
 ### Launcher Menu Heading
 
@@ -60,6 +61,8 @@ Use the **Category** filter to focus on one domain:
 
 ## 5. Search & Filter
 
+- **Basic** view searches keys and default/current/custom values, with a category selector and the core editing workflow.
+- **Advanced** view exposes per-column match modes, status/favourite filters, sorting, and less-used toolbar actions. Switch views from the toolbar; the choice is remembered.
 - Use the **search box** to find strings by key or text content.
 - Combine with **Category** and **Status** (Enhanced / Modified / Unmodified / New) filters.
 - Check **Hide Unmodified** to focus on your own edits only.

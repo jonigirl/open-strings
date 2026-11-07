@@ -43,6 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before extraction.
 - Restore Backup accepts only validated backups from the active channel and saves
   the current game file before replacing it.
+- Apply snapshots edits, aborts if the active channel/data folder changes, and
+  restores the prior game file if a later persistence step fails.
+- Backup filenames remain unique when multiple backups are created in quick succession.
 - Clear Cache now targets the DataForge cache in LocalAppData.
 - Closing the app is deferred if a background worker does not stop in time.
 - Enhancement cache readiness is shown as text and is accessible without relying
@@ -50,6 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Segoe UI font option now applies correctly; Atkinson Hyperlegible is the
   default body font at a readable size.
 - Help, About, and preview content follow the selected body font.
+- Basic and Advanced String Editor views provide a focused global search or the
+  complete filter and secondary-action set, respectively.
 
 ### Changed
 
