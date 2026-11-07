@@ -588,8 +588,10 @@ def _fire_weapon(rapid: str, single: str) -> ET.Element:
     return _xml(
         f"""
         <Entity>
-          <SWeaponActionFireRapidParams name="Rapid" fireRate="{rapid}" />
-          <SWeaponActionFireSingleParams name="Single" fireRate="{single}" />
+          <fireActions>
+            <SWeaponActionFireRapidParams name="Rapid" fireRate="{rapid}" />
+            <SWeaponActionFireSingleParams name="Single" fireRate="{single}" />
+          </fireActions>
         </Entity>
         """
     )
@@ -603,6 +605,37 @@ def test_weapon_formatter_lists_fire_rate_per_mode(gen_module):
 def test_weapon_formatter_single_fire_rate_when_modes_match(gen_module):
     out = gen_module.enhancements_weapon(_fire_weapon("375", "375"), {}, {}, None)
     assert "Fire Rate: 375 RPM" in out
+
+
+def test_weapon_formatter_counts_only_selectable_fire_modes(gen_module):
+    root = _xml(
+        """
+        <Entity>
+          <fireActions>
+            <SWeaponActionSequenceParams name="Burst" localisedName="@FireMode_Burst">
+              <sequenceEntries>
+                <SWeaponSequenceEntryParams delay="600" unit="RPM">
+                  <weaponAction><SWeaponActionFireSingleParams name="Burst" fireRate="550" /></weaponAction>
+                </SWeaponSequenceEntryParams>
+                <SWeaponSequenceEntryParams delay="600" unit="RPM">
+                  <weaponAction><SWeaponActionFireSingleParams name="Burst" fireRate="600" /></weaponAction>
+                </SWeaponSequenceEntryParams>
+              </sequenceEntries>
+            </SWeaponActionSequenceParams>
+            <SWeaponActionDynamicConditionParams localisedName="@LOC_PLACEHOLDER">
+              <conditionalWeaponActions><SConditionalWeaponAction><weaponAction>
+                <SWeaponActionFireSingleParams name="Special" localisedName="@FireMode_Single" fireRate="200" />
+              </weaponAction></SConditionalWeaponAction></conditionalWeaponActions>
+              <defaultWeaponAction>
+                <SWeaponActionFireSingleParams name="Slow" localisedName="@FireMode_Single" fireRate="60" />
+              </defaultWeaponAction>
+            </SWeaponActionDynamicConditionParams>
+          </fireActions>
+        </Entity>
+        """
+    )
+    out = gen_module.enhancements_weapon(root, {}, {"FireMode_Single": "[SEMI]"}, None)
+    assert "Fire Rate: Burst 600 / Semi-Auto 60 RPM" in out
 
 
 def test_fps_armor_formatter_keeps_fractional_precision(gen_module):

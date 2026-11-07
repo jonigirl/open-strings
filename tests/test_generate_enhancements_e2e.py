@@ -45,10 +45,10 @@ def forge(tmp_path):
     _write(human / "armor" / "core.xml", _armor("core_desc", "30", weighted="46.6"))
     _write(
         records / "entities" / "scitem" / "weapons" / "fps_weapons" / "rifle.xml",
-        '<EntityClassDefinition.Rifle><Localization Description="@rifle_desc"/>'
+        '<EntityClassDefinition.Rifle><Localization Description="@rifle_desc"/><fireActions>'
         '<SWeaponActionFireRapidParams name="Rapid" fireRate="375"/>'
         '<SWeaponActionFireSingleParams name="Single" fireRate="300"/>'
-        "</EntityClassDefinition.Rifle>",
+        "</fireActions></EntityClassDefinition.Rifle>",
     )
     base_ini = tmp_path / "out" / "base.ini"
     base_ini.parent.mkdir()

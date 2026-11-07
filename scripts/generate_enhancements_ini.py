@@ -712,13 +712,18 @@ _FIRE_MODE_LABELS = {
     "burst": "Burst",
     "charge": "Charge",
     "shotgun": "Shotgun",
+    "slug": "Slug",
 }
+_FIRE_MODE_LOC_PREFIXES = ("firemode_", "ui_weapons_firemode_")
 
 
 def _fire_mode_label(el: ET.Element, loc: dict | None) -> str | None:
     # Prefer a clean label from the raw name attribute
     raw_name = (el.get("name") or "").strip()
     label = _FIRE_MODE_LABELS.get(raw_name.lower())
+    loc_ref = el.get("localisedName", "").lstrip("@").lower()
+    if not label and loc_ref.startswith(_FIRE_MODE_LOC_PREFIXES):
+        label = _FIRE_MODE_LABELS.get(loc_ref.rsplit("_", 1)[-1])
     if not label:
         # Sentinel loc-keys (e.g. @LOC_PLACEHOLDER) render as literal ``<= PLACEHOLDER =>`` in-game.
         loc_key = el.get("localisedName", "")
@@ -743,17 +748,58 @@ def _fire_modes(root: ET.Element, loc: dict | None = None) -> list[str]:
     return names
 
 
+def _positive_float(value: str | None) -> float:
+    try:
+        return max(float(value or 0), 0.0)
+    except ValueError:
+        return 0.0
+
+
+def _mode_fire_rate(mode: ET.Element) -> float:
+    if "Sequence" in mode.tag:
+        cycle = [
+            _positive_float(entry.get("delay"))
+            for entry in mode.iter("SWeaponSequenceEntryParams")
+            if entry.get("unit") == "RPM"
+        ]
+        if any(cycle):
+            return max(cycle)
+    elif "DynamicCondition" in mode.tag:
+        default_action = mode.find("defaultWeaponAction")
+        if default_action is not None:
+            mode = default_action
+    return max(
+        (_positive_float(el.get("fireRate")) for el in mode.iter() if "WeaponActionFire" in el.tag),
+        default=0.0,
+    )
+
+
+def _mode_label(mode: ET.Element, loc: dict | None) -> str:
+    if "DynamicCondition" in mode.tag:
+        default_action = mode.find("defaultWeaponAction")
+        if default_action is not None:
+            mode = default_action
+    for el in mode.iter():
+        if el is mode or "WeaponAction" in el.tag:
+            label = _fire_mode_label(el, loc)
+            if label:
+                return label
+    return ""
+
+
 def _fire_rates_by_mode(root: ET.Element, loc: dict | None = None) -> list[tuple[str, float]]:
+    """Return one (label, RPM) pair per player-selectable fire mode.
+
+    Only direct children of ``fireActions`` are modes; actions nested inside
+    sequences, parallel groups and conditional actions are steps of that mode.
+    """
     rates: list[tuple[str, float]] = []
-    for el in root.iter():
-        if "WeaponActionFire" not in el.tag:
-            continue
-        try:
-            rate = float(el.get("fireRate") or 0)
-        except ValueError:
-            continue
-        if rate > 0:
-            rates.append((_fire_mode_label(el, loc) or "", rate))
+    for fire_actions in root.iter("fireActions"):
+        for mode in fire_actions:
+            rate = _mode_fire_rate(mode)
+            entry = (_mode_label(mode, loc), rate)
+            if rate > 0 and entry not in rates:
+                rates.append(entry)
     return rates
 
 

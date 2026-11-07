@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   component size tags.
 - Fractional armor reductions keep one decimal place instead of being rounded.
 - Ships without a known length no longer show "Length: 0".
+- Fire mode names use consistent labels such as "Semi-Auto", and steps inside a
+  burst or sequence are no longer listed as separate fire modes.
 - Mission reward lists keep a stable order between generations.
 - Disabled enhancement categories no longer force a full regeneration.
 - Cancelling a tool download with Esc now waits for the download to stop.
