@@ -6,6 +6,7 @@ from unittest.mock import Mock
 import pytest
 from src.gui.main_window import MainWindow
 from src.gui.string_table_model import COL_CURRENT, COL_STAR
+from src.models.string_model import StringEntry
 from src.utils.settings import AppSettings
 
 pytestmark = pytest.mark.unit
@@ -94,3 +95,53 @@ def test_clear_filters_resets_basic_search():
     basic_search.clear.assert_called_once()
     window.filter_header.clear_all.assert_called_once()
     window.apply_filters.assert_called_once()
+
+
+def test_basic_global_search_ignores_hidden_advanced_filters():
+    entry = StringEntry(
+        key="sample",
+        source_file="global",
+        category="Ships",
+        original_value="stock",
+        custom_value="Search me",
+        status="Modified",
+    )
+    window = SimpleNamespace(
+        _view_mode=AppSettings.VIEW_MODE_BASIC,
+        entries=[entry],
+        default_values={},
+        filter_header=SimpleNamespace(
+            get_filter_texts=lambda: ["", "not this key", "", "", "", "", ""],
+            get_filter_modes=lambda: ["contains"] * 7,
+        ),
+        category_combo=SimpleNamespace(currentText=lambda: "All"),
+        status_combo=SimpleNamespace(currentText=lambda: "Unmodified"),
+        hide_unmodified_check=SimpleNamespace(isChecked=lambda: True),
+        favorites_only_check=SimpleNamespace(isChecked=lambda: True),
+        basic_search_input=SimpleNamespace(text=lambda: "search me"),
+    )
+
+    assert MainWindow._filtered_entry_indices(window) == [0]
+
+
+def test_advanced_view_keeps_per_column_filters():
+    entries = [
+        StringEntry(key="needle", source_file="global", category="Ships", original_value="stock"),
+        StringEntry(key="other", source_file="global", category="Ships", original_value="stock"),
+    ]
+    window = SimpleNamespace(
+        _view_mode=AppSettings.VIEW_MODE_ADVANCED,
+        entries=entries,
+        default_values={},
+        filter_header=SimpleNamespace(
+            get_filter_texts=lambda: ["", "needle", "", "", "", "", ""],
+            get_filter_modes=lambda: ["contains"] * 7,
+        ),
+        category_combo=SimpleNamespace(currentText=lambda: "All"),
+        status_combo=SimpleNamespace(currentText=lambda: "All"),
+        hide_unmodified_check=SimpleNamespace(isChecked=lambda: False),
+        favorites_only_check=SimpleNamespace(isChecked=lambda: False),
+        basic_search_input=SimpleNamespace(text=lambda: "other"),
+    )
+
+    assert MainWindow._filtered_entry_indices(window) == [0]

@@ -192,8 +192,11 @@ def create_toolbar(parent: MainWindow) -> QVBoxLayout:
     filter_layout.addWidget(parent.basic_search_input, stretch=1)
     filter_layout.addSpacing(8)
 
-    filter_layout.addWidget(QLabel("Category:"))
+    parent.category_filter_label = QLabel("Category:")
+    filter_layout.addWidget(parent.category_filter_label)
     parent.category_combo = QComboBox()
+    parent.category_filter_label.setBuddy(parent.category_combo)
+    parent.category_combo.setAccessibleName("Category filter")
     parent.category_combo.setMinimumWidth(200)
     parent.category_combo.setToolTip(
         "Filter rows by domain (Ships, Ship Items, Missions, Gear, Commodities, Journal, Other). "
@@ -205,6 +208,8 @@ def create_toolbar(parent: MainWindow) -> QVBoxLayout:
     parent.status_filter_label = QLabel("Status:")
     filter_layout.addWidget(parent.status_filter_label)
     parent.status_combo = QComboBox()
+    parent.status_filter_label.setBuddy(parent.status_combo)
+    parent.status_combo.setAccessibleName("Status filter")
     parent.status_combo.addItems(["All", "Modified", "Enhanced", "Unmodified", "New"])
     parent.status_combo.setMaximumWidth(120)
     parent.status_combo.setToolTip(

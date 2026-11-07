@@ -84,6 +84,7 @@ class MainWindow(QMainWindow):
     basic_search_label: QLabel
     basic_search_input: QLineEdit
     status_filter_label: QLabel
+    category_filter_label: QLabel
     menu_heading_widget: QWidget
     _advanced_toolbar_buttons: list[QPushButton]
     _advanced_filter_widgets: list[QWidget]
