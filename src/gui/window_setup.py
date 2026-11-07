@@ -78,9 +78,11 @@ def create_toolbar(parent: MainWindow) -> QVBoxLayout:
     parent.view_mode_group.addButton(parent.advanced_mode_btn)
     parent.basic_mode_btn.setChecked(AppSettings.get_view_mode() == AppSettings.VIEW_MODE_BASIC)
     parent.advanced_mode_btn.setChecked(AppSettings.get_view_mode() == AppSettings.VIEW_MODE_ADVANCED)
-    parent.basic_mode_btn.clicked.connect(lambda _checked=False: parent.set_view_mode(AppSettings.VIEW_MODE_BASIC))
-    parent.advanced_mode_btn.clicked.connect(
-        lambda _checked=False: parent.set_view_mode(AppSettings.VIEW_MODE_ADVANCED)
+    parent.basic_mode_btn.toggled.connect(
+        lambda checked: parent.set_view_mode(AppSettings.VIEW_MODE_BASIC) if checked else None
+    )
+    parent.advanced_mode_btn.toggled.connect(
+        lambda checked: parent.set_view_mode(AppSettings.VIEW_MODE_ADVANCED) if checked else None
     )
     button_layout.addWidget(parent.basic_mode_btn)
     button_layout.addWidget(parent.advanced_mode_btn)

@@ -1406,8 +1406,13 @@ class MainWindow(QMainWindow):
     def _apply_view_mode(self, mode: str) -> None:
         basic = mode == AppSettings.VIEW_MODE_BASIC
         self._view_mode = mode
-        self.basic_mode_btn.setChecked(basic)
-        self.advanced_mode_btn.setChecked(not basic)
+        for button, checked in (
+            (self.basic_mode_btn, basic),
+            (self.advanced_mode_btn, not basic),
+        ):
+            was_blocked = button.blockSignals(True)
+            button.setChecked(checked)
+            button.blockSignals(was_blocked)
         for button in self._advanced_toolbar_buttons:
             button.setVisible(not basic)
         for widget in self._advanced_filter_widgets:

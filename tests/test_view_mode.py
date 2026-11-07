@@ -22,6 +22,11 @@ class _Visibility:
     def setChecked(self, checked: bool) -> None:
         self.checked = checked
 
+    def blockSignals(self, blocked: bool) -> bool:
+        previous = getattr(self, "signals_blocked", False)
+        self.signals_blocked = blocked
+        return previous
+
 
 def _window():
     advanced_toolbar = [_Visibility() for _ in range(4)]
