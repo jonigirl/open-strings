@@ -109,7 +109,7 @@ begin
   Result := (GetUninstallString() <> '');
 end;
 
-procedure ClearStaleUninstallEntry();
+function ClearStaleUninstallEntry(): Boolean;
 var
   sRegPath: String;
 begin
@@ -125,10 +125,35 @@ begin
   sRegPath := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#emit SetupSetting("AppId")}_is1';
   RegDeleteKeyIncludingSubkeys(HKLM, sRegPath);
   RegDeleteKeyIncludingSubkeys(HKCU, sRegPath);
-  Log('Cleared stale uninstall registry entry (unins000.exe was missing)');
+  Result := not RegKeyExists(HKLM, sRegPath) and not RegKeyExists(HKCU, sRegPath);
+  if Result then
+    Log('Cleared stale uninstall registry entry (unins000.exe was missing)')
+  else
+    Log('ERROR: could not clear stale uninstall registry entry.');
 end;
 
-function WaitForUninstallToFinish(MaxSeconds: Integer): Boolean;
+function CountActiveUninstallTempDirs(): Integer;
+var
+  FindRec: TFindRec;
+  TempDir: String;
+begin
+  Result := 0;
+  TempDir := ExpandConstant('{tmp}');
+  if FindFirst(TempDir + '\is-*-uninstall.tmp', FindRec) then
+  begin
+    try
+      repeat
+        if DirExists(TempDir + '\' + FindRec.Name) and
+           not FileExists(TempDir + '\' + FindRec.Name + '\_unins-done.tmp') then
+          Result := Result + 1;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+end;
+
+function WaitForUninstallToFinish(MaxSeconds, BaselineTempDirs: Integer): Boolean;
 var
   RegPath: String;
   Dummy:   String;
@@ -136,15 +161,15 @@ var
 begin
   { Inno Setup's silent uninstaller detaches to %TEMP%\_iu*.tmp, so
     ewWaitUntilTerminated returns as soon as the launcher exits — not when
-    the real cleanup finishes. Poll for the AppId Uninstall registry key to
-    disappear; that's the very last thing the temp copy does before it
-    exits. }
+    the real cleanup finishes. The registry entry can disappear before the
+    detached temp uninstaller exits, so wait for both cleanup signals. }
   RegPath := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#emit SetupSetting("AppId")}_is1';
   Elapsed := 0;
   while Elapsed < MaxSeconds * 4 do
   begin
     if (not RegQueryStringValue(HKLM, RegPath, 'UninstallString', Dummy)) and
-       (not RegQueryStringValue(HKCU, RegPath, 'UninstallString', Dummy)) then
+       (not RegQueryStringValue(HKCU, RegPath, 'UninstallString', Dummy)) and
+      (CountActiveUninstallTempDirs() <= BaselineTempDirs) then
     begin
       Result := True;
       Exit;
@@ -159,68 +184,55 @@ function UnInstallOldVersion(): Integer;
 var
   sUnInstallString: String;
   iResultCode:      Integer;
-  SavedStatus:      String;
-  SavedStyle:       TNewProgressBarStyle;
+  ExecStarted:      Boolean;
+  BaselineTempDirs: Integer;
 begin
   { Return Values:
     1 - uninstall string is empty
-    2 - error executing the UnInstallString
+    2 - error executing the UnInstallString or waiting for cleanup
     3 - successfully executed the UnInstallString
-    4 - uninstall string found but the unins000.exe doesn't exist (zombie
-        entry from a manual folder deletion) — cleared the registry entry
-        so the new install can register fresh. }
+    4 - stale uninstall entry was cleared. }
 
   Result := 0;
-
-  { get the uninstall string of the old app }
   sUnInstallString := GetUninstallString();
-  if sUnInstallString = '' then begin
+  if sUnInstallString = '' then
+  begin
     Result := 1;
     Exit;
   end;
 
   sUnInstallString := RemoveQuotes(sUnInstallString);
-
-  { Zombie-entry guard: if the recorded unins000.exe isn't on disk, running
-    Exec() against it would fail silently and leave the registry entry
-    dangling forever (plus Windows' "Installed Apps" would keep offering a
-    broken Uninstall button). Nuke the registry entry and let the new
-    install write a fresh one. Addresses the
-      "Windows cannot find …\unins000.exe"
-    error users report after a partial/manual removal of a custom-path
-    install. }
-  if not FileExists(sUnInstallString) then begin
-    ClearStaleUninstallEntry();
-    Result := 4;
+  if not FileExists(sUnInstallString) then
+  begin
+    if ClearStaleUninstallEntry() then
+      Result := 4
+    else
+      Result := 2;
     Exit;
   end;
 
-  { Distinct upgrade step: tell the user what's happening while we wait,
-    then block until the old uninstaller has fully removed itself. Without
-    this, Inno Setup's silent uninstaller detaches to %TEMP%\_iu*.tmp and
-    returns control before its final cleanup pass runs. That tail end would
-    then race the [Files] section and delete the newly-written unins000.exe
-    and AppId registry entry — leaving the app installed with no way to
-    remove it from Apps & Features. }
-  SavedStatus := WizardForm.StatusLabel.Caption;
-  SavedStyle  := WizardForm.ProgressGauge.Style;
-  WizardForm.StatusLabel.Caption  := 'Uninstalling previous version...';
-  WizardForm.ProgressGauge.Style  := npbstMarquee;
-  WizardForm.Update;
+  BaselineTempDirs := CountActiveUninstallTempDirs();
+  ExecStarted := Exec(
+    sUnInstallString,
+    '/SILENT /NORESTART /SUPPRESSMSGBOXES',
+    '',
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    iResultCode
+  );
 
-  Exec(sUnInstallString, '/SILENT /NORESTART /SUPPRESSMSGBOXES','', SW_HIDE, ewWaitUntilTerminated, iResultCode);
-
-  { Race fix: wait for the old uninstaller's registry-key deletion (its
-    actual last act) before we copy any files. Timeout after 90 s. }
-  if not WaitForUninstallToFinish(90) then
-    Log('WARNING: timed out waiting for old uninstaller to finish (90s). '
-      + 'The new install may produce a broken uninstaller; user should '
-      + 'uninstall and reinstall manually if Apps & Features entry is missing.');
-
-  WizardForm.StatusLabel.Caption := SavedStatus;
-  WizardForm.ProgressGauge.Style := SavedStyle;
-  WizardForm.Update;
-
+  if not ExecStarted then
+  begin
+    Log('ERROR: could not start the previous version uninstaller.');
+    Result := 2;
+    Exit;
+  end;
+  if not WaitForUninstallToFinish(90, BaselineTempDirs) then
+  begin
+    Log('ERROR: timed out waiting for the previous version uninstaller to finish.');
+    Result := 2;
+    Exit;
+  end;
   if iResultCode = 0 then
     Result := 3
   else
@@ -451,8 +463,6 @@ var
 begin
   if CurStep = ssInstall then
   begin
-    if IsUpgrade() then
-      UnInstallOldVersion();
     CleanCachedData();
   end;
   if CurStep = ssPostInstall then
@@ -763,11 +773,11 @@ end;
 
 function InitializeSetup(): Boolean;
 var
-  ResultCode: Integer;
   UninstallString: String;
   UninstallExe: String;
   ButtonPressed: Integer;
   InstalledVer: String;
+  UninstallResult: Integer;
 begin
   Result := True;
 
@@ -784,8 +794,12 @@ begin
     UninstallExe := RemoveQuotes(UninstallString);
     if not FileExists(UninstallExe) then
     begin
-      ClearStaleUninstallEntry();
-      Exit;  { Result is already True — proceed with fresh install }
+      if not ClearStaleUninstallEntry() then
+      begin
+        MsgBox('The stale uninstall registration could not be removed. Setup will exit without installing.', mbError, MB_OK);
+        Result := False;
+      end;
+      Exit;
     end;
 
     { Show custom dialog with three options }
@@ -802,13 +816,18 @@ begin
 
     case ButtonPressed of
       IDYES: begin
-        { Continue with upgrade (uninstall old, then install new) }
-        Result := True;
+        UninstallResult := UnInstallOldVersion();
+        if (UninstallResult <> 3) and (UninstallResult <> 4) then
+        begin
+          MsgBox('The previous version could not be completely uninstalled. Setup will exit without installing.', mbError, MB_OK);
+          Result := False;
+        end;
       end;
       IDNO: begin
         { Uninstall only, without installing new version }
-        UninstallString := RemoveQuotes(UninstallString);
-        Exec(UninstallString, '/SILENT /NORESTART /SUPPRESSMSGBOXES','', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+        UninstallResult := UnInstallOldVersion();
+        if (UninstallResult <> 3) and (UninstallResult <> 4) then
+          MsgBox('The previous version could not be completely uninstalled.', mbError, MB_OK);
         Result := False;
       end;
       IDCANCEL: begin

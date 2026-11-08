@@ -57,6 +57,7 @@ class TestConstruction:
         assert coord._forge_worker is None
         assert coord._enhancements_worker is None
         assert coord._startup_sync_worker is None
+        assert coord._locpack_export_worker is None
 
     def test_all_progress_dialogs_are_none(self, qtbot):
         coord, _ = _make_coordinator(qtbot)
@@ -65,6 +66,73 @@ class TestConstruction:
         assert coord._p4k_progress is None
         assert coord._forge_progress_dialog is None
         assert coord._enhancements_progress_dialog is None
+        assert coord._locpack_export_progress is None
+
+
+class TestRefreshTheme:
+    def test_refreshes_active_progress_dialogs(self, qtbot):
+        coord, _ = _make_coordinator(qtbot)
+        dialogs = [MagicMock() for _ in range(6)]
+        (
+            coord._apply_progress,
+            coord._locpack_export_progress,
+            coord._startup_progress,
+            coord._p4k_progress,
+            coord._forge_progress_dialog,
+            coord._enhancements_progress_dialog,
+        ) = dialogs
+
+        coord.refresh_theme()
+
+        for dialog in dialogs:
+            dialog.refresh_theme.assert_called_once_with()
+
+
+class TestStartLocpackExport:
+    def test_starts_worker_with_progress_dialog(self, monkeypatch, qtbot, tmp_path):
+        from src.gui import worker_coordinator
+
+        coord, _ = _make_coordinator(qtbot)
+        progress = MagicMock()
+        worker = MagicMock()
+        monkeypatch.setattr(worker_coordinator, "AnimatedProgressDialog", lambda *args, **kwargs: progress)
+        monkeypatch.setattr(worker_coordinator, "LocPackExportWorker", lambda *args: worker)
+
+        output = tmp_path / "shared.zip"
+        coord.start_locpack_export(output, include_personal_edits=False)
+
+        assert coord._locpack_export_worker is worker
+        worker.progress.connect.assert_called_once_with(progress.setLabelText)
+        worker.completed.connect.assert_called_once_with(coord._on_locpack_export_completed)
+        worker.error.connect.assert_called_once_with(coord._on_locpack_export_error)
+        worker.finished.connect.assert_called_once_with(coord._on_locpack_export_thread_finished)
+        worker.start.assert_called_once_with()
+
+    def test_completion_closes_progress_and_forwards_sizes(self, qtbot, tmp_path):
+        coord, _ = _make_coordinator(qtbot)
+        progress = MagicMock()
+        coord._locpack_export_progress = progress
+        results = []
+        coord.locpack_export_completed.connect(lambda *args: results.append(args))
+
+        coord._on_locpack_export_completed(str(tmp_path / "shared.zip"), 100, 50)
+
+        progress.close.assert_called_once_with()
+        assert coord._locpack_export_progress is None
+        assert results == [(str(tmp_path / "shared.zip"), 100, 50)]
+
+    def test_error_closes_progress_and_forwards_message(self, qtbot):
+        coord, _ = _make_coordinator(qtbot)
+        progress = MagicMock()
+        coord._locpack_export_progress = progress
+        errors = []
+        coord.locpack_export_error.connect(errors.append)
+
+        coord._on_locpack_export_error("missing enabled file")
+
+        progress.close.assert_called_once_with()
+        assert coord._locpack_export_progress is None
+        assert errors == ["missing enabled file"]
 
 
 # ── has_active_worker ─────────────────────────────────────────────────────────
@@ -96,6 +164,13 @@ class TestHasActiveWorker:
         coord._enhancements_worker = w
         assert coord.has_active_worker()
 
+    def test_true_when_locpack_export_running(self, qtbot):
+        coord, _ = _make_coordinator(qtbot)
+        worker = _mock_worker()
+        worker.isRunning.return_value = True
+        coord._locpack_export_worker = worker
+        assert coord.has_active_worker()
+
     def test_false_when_workers_present_but_not_running(self, qtbot):
         coord, _ = _make_coordinator(qtbot)
         coord._loader_worker = _mock_worker()  # isRunning() returns False
@@ -125,6 +200,17 @@ class TestCleanupAll:
         coord._p4k_worker = w
         coord.cleanup_all()
         w.cancel.assert_called_once()
+
+    def test_cleanup_waits_for_locpack_export(self, qtbot):
+        coord, _ = _make_coordinator(qtbot)
+        worker = _mock_worker()
+        worker.isRunning.return_value = True
+        worker.wait.return_value = True
+        coord._locpack_export_worker = worker
+
+        assert coord.cleanup_all() is True
+        worker.quit.assert_called_once()
+        worker.wait.assert_called_once()
 
     def test_cleanup_skips_stopped_workers(self, qtbot):
         coord, _ = _make_coordinator(qtbot)

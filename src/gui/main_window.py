@@ -40,7 +40,7 @@ from src.gui.string_table_model import (
     COL_STAR,
     StringTableModel,
 )
-from src.gui.theme import BRAND_FONT_FAMILY, get_button_color, get_button_text_color
+from src.gui.theme import BRAND_FONT_FAMILY, THEME_OS_DARK, apply_theme, get_button_color, get_button_text_color
 from src.gui.workers import (
     AnimatedProgressDialog,
 )
@@ -48,7 +48,7 @@ from src.models.string_model import StringEntry
 from src.utils.applied_file_validator import validate_applied_file
 from src.utils.apply_engine import restore_apply_backup
 from src.utils.entry_filter import filter_entry_indices
-from src.utils.locpack_exporter import default_locpack_filename, write_locpack_zip
+from src.utils.locpack_exporter import default_locpack_filename
 from src.utils.perf import timed
 from src.utils.preview_renderer import _render_preview_html
 from src.utils.resource import get_resource_path
@@ -147,6 +147,11 @@ class MainWindow(QMainWindow):
         self.setup_ui()
         self.restore_window_state()
         self._model.dataChanged.connect(self._save_user_edits)
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            style_hints = app.styleHints()
+            if style_hints is not None:
+                style_hints.colorSchemeChanged.connect(self._on_system_color_scheme_changed)
 
         # Wire coordinator signals to MainWindow result handlers.
         # Done after setup_ui() so enhancements_tab is available.
@@ -154,6 +159,8 @@ class MainWindow(QMainWindow):
         self.worker_coord.loading_error.connect(self._on_loading_error)
         self.worker_coord.apply_finished.connect(self._on_apply_finished)
         self.worker_coord.apply_error.connect(self._on_apply_error)
+        self.worker_coord.locpack_export_completed.connect(self._on_locpack_export_completed)
+        self.worker_coord.locpack_export_error.connect(self._on_locpack_export_error)
         self.worker_coord.p4k_finished.connect(self._on_p4k_extract_finished)
         self.worker_coord.dataforge_operation_running.connect(self.enhancements_tab.set_operation_running)
         self.worker_coord.dataforge_finished.connect(self._on_dataforge_extract_finished)
@@ -552,47 +559,69 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot()
     def export_locpack(self):
-        """Package the currently-applied global.ini into a zip for sharing."""
-        if not AppSettings.get_game_install_path():
-            QMessageBox.warning(self, "Warning", "Please configure game install path in Config tab")
+        """Export either the applied file or a shared merge without user edits."""
+        mode_dialog = QMessageBox(self)
+        mode_dialog.setWindowTitle("Export Loc-Pack")
+        mode_dialog.setText("Choose what to include in the loc-pack.")
+        mode_dialog.setInformativeText(
+            "Applied includes personal edits. Shared includes base localization and enabled enhancements, "
+            "excluding personal edits and the Open Strings version stamp."
+        )
+        applied_button = mode_dialog.addButton("Applied (includes personal edits)", QMessageBox.ButtonRole.AcceptRole)
+        shared_button = mode_dialog.addButton("Shared (exclude personal edits)", QMessageBox.ButtonRole.ActionRole)
+        mode_dialog.addButton(QMessageBox.StandardButton.Cancel)
+        mode_dialog.setDefaultButton(applied_button)
+        mode_dialog.exec()
+        clicked_button = mode_dialog.clickedButton()
+        if clicked_button not in (applied_button, shared_button):
             return
+        include_personal_edits = clicked_button == applied_button
 
         global_ini = AppSettings.get_global_ini_path()
-        if not global_ini.exists():
+        if include_personal_edits and not AppSettings.get_game_install_path():
+            QMessageBox.warning(self, "Warning", "Please configure game install path in Config tab")
+            return
+        if include_personal_edits and not global_ini.exists():
             QMessageBox.information(
                 self,
                 "Nothing to Export",
                 "No applied global.ini was found in the game's localization directory.\n\n"
-                "Click 'Apply to Game' first to write your customizations, then "
-                "Export to package them for sharing.",
+                "Apply to Game first, or choose Shared to export base localization and enabled enhancements "
+                "without personal edits.",
             )
             return
 
         channel = AppSettings.get_active_channel()
         default_name = default_locpack_filename(channel)
+        title = "Export Loc-Pack"
+        if not include_personal_edits:
+            default_name = default_name.replace("OpenStrings-LocPack-", "OpenStrings-Shared-LocPack-", 1)
+            title = "Export Shared Loc-Pack"
         downloads_dir = Path.home() / "Downloads"
         default_path = str(downloads_dir / default_name)
 
         dest, _ = QFileDialog.getSaveFileName(
             self,
-            "Export Loc-Pack",
+            title,
             default_path,
             "Zip files (*.zip)",
         )
         if not dest:
             return
 
-        dest_path = Path(dest)
-        try:
-            source_size = write_locpack_zip(global_ini, dest_path)
-            zip_size = dest_path.stat().st_size
-            self._status_bar().showMessage(
-                f"Exported loc-pack: {dest_path.name} ({source_size:,} bytes → {zip_size:,} bytes)",
-                8000,
-            )
-        except Exception as exc:
-            logger.exception("Export loc-pack failed: %s", exc)
-            QMessageBox.critical(self, "Export Failed", f"Could not write zip:\n{exc}")
+        self.worker_coord.start_locpack_export(Path(dest), include_personal_edits=include_personal_edits)
+
+    @pyqtSlot(str, int, int)
+    def _on_locpack_export_completed(self, path: str, source_size: int, zip_size: int) -> None:
+        filename = Path(path).name
+        self._status_bar().showMessage(
+            f"Exported loc-pack: {filename} ({source_size:,} bytes → {zip_size:,} bytes)", 8000
+        )
+
+    @pyqtSlot(str)
+    def _on_locpack_export_error(self, message: str) -> None:
+        logger.error("Export loc-pack failed: %s", message)
+        QMessageBox.critical(self, "Export Failed", f"Could not create loc-pack:\n{message}")
 
     @pyqtSlot()
     def open_localization_dir(self):
@@ -654,6 +683,7 @@ class MainWindow(QMainWindow):
         self.clear_cache_btn.setStyleSheet(f"background-color: {get_button_color('clear')}; color: {text}; {base}")
         self.export_locpack_btn.setStyleSheet(f"background-color: {get_button_color('open')}; color: {text}; {base}")
         self.help_btn.setStyleSheet(f"background-color: {get_button_color('open')}; color: {text}; {base}")
+        self.tutorial_btn.setStyleSheet(f"background-color: {get_button_color('open')}; color: {text}; {base}")
         if hasattr(self, "about_browser"):
             self._render_about_html()
         if hasattr(self, "help_browser"):
@@ -661,6 +691,22 @@ class MainWindow(QMainWindow):
         current = self.table.currentIndex()
         if current.isValid():
             self._on_preview_row_changed(current, QModelIndex())
+        viewport = self.table.viewport()
+        if viewport is not None:
+            viewport.update()
+
+    def _on_system_color_scheme_changed(self, _scheme) -> None:
+        if AppSettings.get_theme() == THEME_OS_DARK:
+            QTimer.singleShot(0, self._refresh_system_theme)
+
+    def _refresh_system_theme(self) -> None:
+        if AppSettings.get_theme() != THEME_OS_DARK:
+            return
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            apply_theme(app, THEME_OS_DARK)
+            self.refresh_action_buttons()
+            self.worker_coord.refresh_theme()
 
     def _handle_import_ini(self):
         """Handle Import INI button: get source, validate, resolve conflicts, merge."""

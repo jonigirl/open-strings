@@ -12,6 +12,7 @@ No Open Strings install required on the recipient side.
 from __future__ import annotations
 
 import logging
+import tempfile
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -31,6 +32,12 @@ def default_locpack_filename(channel: str, today: datetime | None = None) -> str
     return f"OpenStrings-LocPack-{channel}-{when.strftime('%Y%m%d')}.zip"
 
 
+def _ensure_output_is_not_input(output_zip_path: Path, input_paths: list[Path]) -> None:
+    output = Path(output_zip_path).resolve()
+    if any(Path(input_path).resolve() == output for input_path in input_paths):
+        raise ValueError("Export destination must not overwrite an input file.")
+
+
 def write_locpack_zip(source_global_ini: Path, output_zip_path: Path) -> int:
     """Write a zip containing *source_global_ini* as ``global.ini`` at the root.
 
@@ -47,6 +54,7 @@ def write_locpack_zip(source_global_ini: Path, output_zip_path: Path) -> int:
     """
     if not source_global_ini.exists():
         raise FileNotFoundError(f"Applied global.ini not found: {source_global_ini}")
+    _ensure_output_is_not_input(output_zip_path, [source_global_ini])
 
     source_size = source_global_ini.stat().st_size
 
@@ -62,3 +70,24 @@ def write_locpack_zip(source_global_ini: Path, output_zip_path: Path) -> int:
         output_zip_path.stat().st_size,
     )
     return source_size
+
+
+def write_shared_locpack_zip(
+    base_ini_path: Path,
+    sources_dict: dict[str, dict[str, str]],
+    hierarchy: list[str],
+    output_zip_path: Path,
+) -> int:
+    """Write a shareable loc-pack from base and enabled enhancements only."""
+    from src.merger.ini_merger import merge_ini_files, merge_sources_by_hierarchy
+    from src.utils.settings import AppSettings
+
+    _ensure_output_is_not_input(output_zip_path, [base_ini_path])
+    sources = {name: values for name, values in sources_dict.items() if name != AppSettings.SOURCE_USER}
+    source_order = [name for name in hierarchy if name != AppSettings.SOURCE_USER]
+    merged = merge_sources_by_hierarchy(sources, source_order)
+
+    with tempfile.TemporaryDirectory(prefix="open-strings-locpack-") as temp_dir:
+        clean_global_ini = Path(temp_dir) / "global.ini"
+        merge_ini_files(base_ini_path, merged, clean_global_ini)
+        return write_locpack_zip(clean_global_ini, output_zip_path)

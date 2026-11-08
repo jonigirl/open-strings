@@ -6,7 +6,7 @@ import zipfile
 from datetime import datetime
 
 import pytest
-from src.utils.locpack_exporter import default_locpack_filename, write_locpack_zip
+from src.utils.locpack_exporter import default_locpack_filename, write_locpack_zip, write_shared_locpack_zip
 
 pytestmark = pytest.mark.unit
 
@@ -96,3 +96,45 @@ class TestWriteLocpackZip:
 
         with pytest.raises(FileNotFoundError, match="Applied global.ini not found"):
             write_locpack_zip(src, dest)
+
+    def test_refuses_to_overwrite_applied_source(self, tmp_path):
+        source = tmp_path / "global.ini"
+        original = b"key=Applied\n"
+        source.write_bytes(original)
+
+        with pytest.raises(ValueError, match="must not overwrite an input file"):
+            write_locpack_zip(source, source)
+
+        assert source.read_bytes() == original
+
+    def test_shared_locpack_excludes_user_source_but_keeps_enhancements(self, tmp_path):
+        base = tmp_path / "base.ini"
+        base.write_text("base_key=Stock\nshared_key=Stock\npersonal_key=Stock\n", encoding="utf-8")
+        sources = {
+            "global": {"base_key": "Stock", "shared_key": "Stock", "personal_key": "Stock"},
+            "enhancements": {"shared_key": "Enhanced"},
+            "user": {"personal_key": "Personal edit", "personal_only": "Private value"},
+        }
+        dest = tmp_path / "shared.zip"
+
+        write_shared_locpack_zip(base, sources, ["global", "enhancements", "user"], dest)
+
+        with zipfile.ZipFile(dest) as zf:
+            assert zf.namelist() == ["global.ini"]
+            exported = zf.read("global.ini").decode("utf-8")
+
+        assert "base_key=Stock" in exported
+        assert "shared_key=Enhanced" in exported
+        assert "personal_key=Stock" in exported
+        assert "Personal edit" not in exported
+        assert "personal_only" not in exported
+
+    def test_shared_locpack_refuses_to_overwrite_base(self, tmp_path):
+        base = tmp_path / "base.ini"
+        original = b"stock=Base\n"
+        base.write_bytes(original)
+
+        with pytest.raises(ValueError, match="must not overwrite an input file"):
+            write_shared_locpack_zip(base, {"global": {"stock": "Base"}}, ["global"], base)
+
+        assert base.read_bytes() == original

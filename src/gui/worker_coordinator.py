@@ -38,6 +38,7 @@ from src.gui.workers import (
     DataForgeExtractWorker,
     EnhancementsGeneratorWorker,
     FileLoaderWorker,
+    LocPackExportWorker,
     P4kExtractWorker,
     StartupSyncWorker,
 )
@@ -69,6 +70,10 @@ class WorkerCoordinator(QObject):
     apply_finished = pyqtSignal(bool, object)
     apply_error = pyqtSignal(str)
 
+    # ── Loc-pack export ──────────────────────────────────────────────────
+    locpack_export_completed = pyqtSignal(str, int, int)
+    locpack_export_error = pyqtSignal(str)
+
     # ── P4K extraction ────────────────────────────────────────────────────
     p4k_finished = pyqtSignal(bool)
 
@@ -96,6 +101,7 @@ class WorkerCoordinator(QObject):
         # ── Worker instances ──────────────────────────────────────────────
         self._loader_worker: FileLoaderWorker | None = None
         self._apply_worker: ApplyWorker | None = None
+        self._locpack_export_worker: LocPackExportWorker | None = None
         self._startup_sync_worker: StartupSyncWorker | None = None
         self._p4k_worker: P4kExtractWorker | None = None
         self._enhancements_worker: EnhancementsGeneratorWorker | None = None
@@ -105,6 +111,7 @@ class WorkerCoordinator(QObject):
         # ── Progress dialogs ──────────────────────────────────────────────
         self._loading_progress: QProgressDialog | None = None
         self._apply_progress: AnimatedProgressDialog | None = None
+        self._locpack_export_progress: AnimatedProgressDialog | None = None
         self._startup_progress: AnimatedProgressDialog | None = None
         self._p4k_progress: AnimatedProgressDialog | None = None
         self._forge_progress_dialog: AnimatedProgressDialog | None = None
@@ -124,6 +131,7 @@ class WorkerCoordinator(QObject):
             self._p4k_worker,
             self._loader_worker,
             self._apply_worker,
+            self._locpack_export_worker,
             self._startup_sync_worker,
         )
         return any(w is not None and w.isRunning() for w in workers)
@@ -135,6 +143,18 @@ class WorkerCoordinator(QObject):
     def is_startup_sync_running(self) -> bool:
         """True while a StartupSyncWorker is actively running."""
         return self._startup_sync_worker is not None
+
+    def refresh_theme(self) -> None:
+        for dialog in (
+            self._apply_progress,
+            self._locpack_export_progress,
+            self._startup_progress,
+            self._p4k_progress,
+            self._forge_progress_dialog,
+            self._enhancements_progress_dialog,
+        ):
+            if dialog is not None:
+                dialog.refresh_theme()
 
     # ── File loading ──────────────────────────────────────────────────────
 
@@ -204,6 +224,21 @@ class WorkerCoordinator(QObject):
         worker.completed.connect(self._on_apply_completed)
         worker.start()
 
+    def start_locpack_export(self, output_path: Path, *, include_personal_edits: bool) -> None:
+        if self._locpack_export_worker is not None:
+            return
+
+        self._locpack_export_progress = AnimatedProgressDialog(
+            "Preparing loc-pack…", parent=self._parent, title="Exporting Loc-Pack"
+        )
+        worker = LocPackExportWorker(output_path, include_personal_edits)
+        self._locpack_export_worker = worker
+        worker.progress.connect(self._locpack_export_progress.setLabelText)
+        worker.completed.connect(self._on_locpack_export_completed)
+        worker.error.connect(self._on_locpack_export_error)
+        worker.finished.connect(self._on_locpack_export_thread_finished)
+        worker.start()
+
     @pyqtSlot(list)
     def _confirm_apply_missing_sources(self, names: list[str]) -> None:
         if self._apply_progress is not None:
@@ -236,6 +271,28 @@ class WorkerCoordinator(QObject):
             self._apply_worker = None
         self._parent._set_toolbar_enabled(True)
         self.apply_finished.emit(success, result)
+
+    def _close_locpack_export_progress(self) -> None:
+        if self._locpack_export_progress is not None:
+            self._locpack_export_progress.close()
+            self._locpack_export_progress = None
+
+    @pyqtSlot(str, int, int)
+    def _on_locpack_export_completed(self, path: str, source_size: int, zip_size: int) -> None:
+        self._close_locpack_export_progress()
+        self.locpack_export_completed.emit(path, source_size, zip_size)
+
+    @pyqtSlot(str)
+    def _on_locpack_export_error(self, message: str) -> None:
+        self._close_locpack_export_progress()
+        self.locpack_export_error.emit(message)
+
+    @pyqtSlot()
+    def _on_locpack_export_thread_finished(self) -> None:
+        worker = self._locpack_export_worker
+        self._locpack_export_worker = None
+        if worker is not None:
+            worker.deleteLater()
 
     @pyqtSlot(list, dict, list)
     def _on_loading_done(self, entries: list, default_values: dict, sort_keys: list) -> None:
@@ -518,6 +575,7 @@ class WorkerCoordinator(QObject):
             self._p4k_worker,
             self._enhancements_worker,
             self._forge_worker,
+            self._locpack_export_worker,
         )
         for worker in workers:
             if worker is not None and worker.isRunning():

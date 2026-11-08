@@ -73,7 +73,7 @@ class ConfigTab(QWidget):
 
         self.theme_combo = QComboBox()
         self.theme_combo.setToolTip(
-            "Switch the app theme. Takes effect immediately across the main window, toolbar, tabs, and Help panel."
+            "Default follows Windows appearance; Light and Dark stay fixed. Takes effect immediately."
         )
         self.theme_combo.addItem("Default", THEME_OS_DARK)
         self.theme_combo.addItem("Light", THEME_LIGHT)

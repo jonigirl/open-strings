@@ -11,6 +11,7 @@ import logging
 import sys
 from pathlib import Path
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QFontDatabase, QPalette
 from PyQt6.QtWidgets import QApplication, QProxyStyle, QStyle
 
@@ -98,6 +99,26 @@ THEME_OS_DARK = "os-dark"
 AVAILABLE_THEMES = (THEME_LIGHT, THEME_DARK, THEME_OS_DARK)
 DEFAULT_THEME = THEME_OS_DARK
 
+
+def get_effective_theme(theme: str | None = None, *, color_scheme: Qt.ColorScheme | None = None) -> str:
+    """Resolve the system-following theme to the current OS light/dark scheme."""
+    if theme is None:
+        from src.utils.settings import AppSettings
+
+        theme = AppSettings.get_theme()
+    if theme != THEME_OS_DARK:
+        return theme
+
+    if color_scheme is None:
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            style_hints = app.styleHints()
+            color_scheme = style_hints.colorScheme() if style_hints is not None else Qt.ColorScheme.Unknown
+        else:
+            color_scheme = Qt.ColorScheme.Unknown
+    return THEME_LIGHT if color_scheme == Qt.ColorScheme.Light else THEME_OS_DARK
+
+
 # Secondary/dim text color per theme. A single shade can't stay readable on
 # both #C8C8C8 (light window) and #0D1826 (scle navy) — so we resolve it
 # per-theme and surface it via the app-level QSS rule in `_app_stylesheet_for`.
@@ -139,7 +160,7 @@ def get_button_color(role: str) -> str:
     """Return the button color for the given role (load/restore/apply/clear/open)."""
     from src.utils.settings import AppSettings
 
-    theme = AppSettings.get_theme()
+    theme = get_effective_theme(AppSettings.get_theme())
     palette = _BUTTON_COLORS.get(theme, _BUTTON_COLORS[DEFAULT_THEME])
     return palette[role]
 
@@ -152,7 +173,7 @@ def get_button_text_color() -> str:
     """
     from src.utils.settings import AppSettings
 
-    return "white" if AppSettings.get_theme() == THEME_LIGHT else "black"
+    return "white" if get_effective_theme(AppSettings.get_theme()) == THEME_LIGHT else "black"
 
 
 # Per-theme colors for the branded title + tagline labels at the top of the
@@ -174,13 +195,13 @@ _TAGLINE_COLORS = {
 def get_title_color() -> str:
     from src.utils.settings import AppSettings
 
-    return _TITLE_COLORS.get(AppSettings.get_theme(), _TITLE_COLORS[DEFAULT_THEME])
+    return _TITLE_COLORS.get(get_effective_theme(AppSettings.get_theme()), _TITLE_COLORS[DEFAULT_THEME])
 
 
 def get_tagline_color() -> str:
     from src.utils.settings import AppSettings
 
-    return _TAGLINE_COLORS.get(AppSettings.get_theme(), _TAGLINE_COLORS[DEFAULT_THEME])
+    return _TAGLINE_COLORS.get(get_effective_theme(AppSettings.get_theme()), _TAGLINE_COLORS[DEFAULT_THEME])
 
 
 # Progress-bar colors — groove (unfilled track) and chunk (filled region).
@@ -203,13 +224,15 @@ _PROGRESS_CHUNK_COLORS = {
 def get_progress_groove_color() -> str:
     from src.utils.settings import AppSettings
 
-    return _PROGRESS_GROOVE_COLORS.get(AppSettings.get_theme(), _PROGRESS_GROOVE_COLORS[DEFAULT_THEME])
+    theme = get_effective_theme(AppSettings.get_theme())
+    return _PROGRESS_GROOVE_COLORS.get(theme, _PROGRESS_GROOVE_COLORS[DEFAULT_THEME])
 
 
 def get_progress_chunk_color() -> str:
     from src.utils.settings import AppSettings
 
-    return _PROGRESS_CHUNK_COLORS.get(AppSettings.get_theme(), _PROGRESS_CHUNK_COLORS[DEFAULT_THEME])
+    theme = get_effective_theme(AppSettings.get_theme())
+    return _PROGRESS_CHUNK_COLORS.get(theme, _PROGRESS_CHUNK_COLORS[DEFAULT_THEME])
 
 
 def _light_palette() -> QPalette:
@@ -381,6 +404,9 @@ def apply_theme(app: QApplication, theme: str) -> None:
     if theme not in AVAILABLE_THEMES:
         logger.warning(f"Unknown theme {theme!r}; using {DEFAULT_THEME}")
         theme = DEFAULT_THEME
+    style_hints = app.styleHints()
+    system_scheme = style_hints.colorScheme() if style_hints is not None else Qt.ColorScheme.Unknown
+    effective_theme = get_effective_theme(theme, color_scheme=system_scheme)
 
     # "Already applied?" check: PyQt slices QProxyStyle back to QCommonStyle
     # when you call app.style(), so isinstance() can't see our subclass.
@@ -393,6 +419,6 @@ def apply_theme(app: QApplication, theme: str) -> None:
         # QProxyStyle(str) resolves the base style by name, so this still
         # gives us the Fusion look — just with our tooltip-delay override.
         app.setStyle(_OpenStringsProxyStyle("Fusion"))
-    app.setPalette(_palette_for(theme))
-    app.setStyleSheet(_app_stylesheet_for(theme))
-    logger.info(f"Applied theme: {theme}")
+    app.setPalette(_palette_for(effective_theme))
+    app.setStyleSheet(_app_stylesheet_for(effective_theme))
+    logger.info(f"Applied theme: {theme} (effective: {effective_theme})")

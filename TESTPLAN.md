@@ -1,14 +1,16 @@
 # Open Strings Pre-Release Test Plan
 
-Focused on the UX and integration paths `pytest` can't reach. Automated coverage already exists for parsing/merging/missions/patcher/pak-filtering/channel layout/progress/StringTableModel — don't duplicate.
+> **Retired:** This is the original 1.0-era test plan and is retained for historical reference only. Use [TESTING.md](TESTING.md) for current verification. Its installer version, channel, output-count, and data assumptions are stale; do not use it as a release checklist.
 
-**Before starting:** `uv run pytest` must pass green and meet the configured 83% coverage floor. Build a fresh installer and drive the tests below against that installer (not the dev checkout).
+> **Archive warning:** All procedures and checkbox states below are obsolete snapshots, not current instructions or status. Do not run their build commands or use their expected versions, paths, or output counts.
+
+**Historical 1.0 prerequisite (superseded; do not follow):** `uv run pytest` had to pass the then-configured coverage floor, followed by testing a fresh 1.0 installer.
 
 ---
 
 ## 1. Install & upgrade matrix
 
-Run against the built `dist/OpenStrings-1.0.0-Setup.exe`.
+Historical target only: `dist/OpenStrings-1.0.0-Setup.exe`.
 
 - [ ] **Fresh install** — app launches, tutorial fires on first show, settings JSON is created under `%APPDATA%`
 - [ ] **Reinstall over existing** — no duplicate migrations, no data loss, no zombie uninstall entry
@@ -100,9 +102,9 @@ Boot SC (LIVE) after an Apply. Spot-check each category:
 - [ ] `HELP.md` — renders in Help dock; Config tab section matches current UI; Known Issues section current
 - [ ] `CLAUDE.md` — no stale 0.8.x references
 
-## 10. Release artifact sanity
+## 10. Historical 1.0 release checks (not current)
 
-Before tagging 1.0:
+The following items are retained for history only; they are not current release actions.
 
 - [ ] `VERSION.TXT` bumped to `1.0.0`
 - [ ] `pytest tests/ -n auto` passes clean

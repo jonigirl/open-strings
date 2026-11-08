@@ -33,13 +33,16 @@ class _Visibility:
 
 def _window():
     advanced_toolbar = [_Visibility() for _ in range(4)]
-    advanced_filters = [_Visibility() for _ in range(7)]
+    advanced_filters = [_Visibility() for _ in range(6)]
+    clear_filters_btn = _Visibility()
+    clear_filters_btn.visible = True
     return (
         SimpleNamespace(
             basic_mode_btn=_Visibility(),
             advanced_mode_btn=_Visibility(),
             _advanced_toolbar_buttons=advanced_toolbar,
             _advanced_filter_widgets=advanced_filters,
+            clear_filters_btn=clear_filters_btn,
             basic_search_label=_Visibility(),
             basic_search_input=_Visibility(),
             filter_header=SimpleNamespace(set_filter_row_visible=Mock()),
@@ -48,11 +51,12 @@ def _window():
         ),
         advanced_toolbar,
         advanced_filters,
+        clear_filters_btn,
     )
 
 
 def test_basic_view_keeps_search_and_hides_advanced_controls():
-    window, advanced_toolbar, advanced_filters = _window()
+    window, advanced_toolbar, advanced_filters, clear_filters_btn = _window()
 
     MainWindow._apply_view_mode(window, AppSettings.VIEW_MODE_BASIC)
 
@@ -62,6 +66,7 @@ def test_basic_view_keeps_search_and_hides_advanced_controls():
     assert window.basic_search_input.visible is True
     assert all(not button.visible for button in advanced_toolbar)
     assert all(not control.visible for control in advanced_filters)
+    assert clear_filters_btn.visible is True
     assert window.filter_header.set_filter_row_visible.call_args.args == (False,)
     assert window.menu_heading_widget.visible is False
     window.table.setColumnHidden.assert_any_call(COL_CURRENT, True)
@@ -69,7 +74,7 @@ def test_basic_view_keeps_search_and_hides_advanced_controls():
 
 
 def test_advanced_view_restores_full_controls():
-    window, advanced_toolbar, advanced_filters = _window()
+    window, advanced_toolbar, advanced_filters, clear_filters_btn = _window()
 
     MainWindow._apply_view_mode(window, AppSettings.VIEW_MODE_ADVANCED)
 
@@ -78,6 +83,7 @@ def test_advanced_view_restores_full_controls():
     assert window.basic_search_input.visible is False
     assert all(control.visible for control in advanced_toolbar)
     assert all(control.visible for control in advanced_filters)
+    assert clear_filters_btn.visible is True
     assert window.filter_header.set_filter_row_visible.call_args.args == (True,)
     assert window.menu_heading_widget.visible is True
     window.table.setColumnHidden.assert_any_call(COL_CURRENT, False)
@@ -101,6 +107,7 @@ def test_clear_filters_resets_basic_search():
     MainWindow.clear_filters(window)
 
     basic_search.clear.assert_called_once()
+    category.setCurrentIndex.assert_called_once_with(0)
     window.filter_header.clear_all.assert_called_once()
     window.apply_filters.assert_called_once()
 

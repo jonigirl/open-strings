@@ -47,10 +47,9 @@ _FAV_BG_LIGHT = QColor("#FFF4C4")  # soft pale gold for light theme
 
 def _fav_row_bg() -> QColor:
     """Return the favorite-row highlight appropriate for the current theme."""
-    from src.gui.theme import THEME_LIGHT
-    from src.utils.settings import AppSettings
+    from src.gui.theme import THEME_LIGHT, get_effective_theme
 
-    return _FAV_BG_LIGHT if AppSettings.get_theme() == THEME_LIGHT else _FAV_BG_DARK
+    return _FAV_BG_LIGHT if get_effective_theme() == THEME_LIGHT else _FAV_BG_DARK
 
 
 def status_color(status: str) -> QColor:

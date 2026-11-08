@@ -266,7 +266,6 @@ def create_toolbar(parent: MainWindow) -> QVBoxLayout:
         parent.hide_unmodified_check,
         parent.favorites_only_check,
         parent.grouped_sort_btn,
-        parent.clear_filters_btn,
         parent.copy_filtered_btn,
     ]
 

@@ -119,6 +119,37 @@ class AnimatedProgressDialog(QProgressDialog):
         self._message_label.setToolTip(message if display != message else "")
         super().setLabelText(display)
 
+    def refresh_theme(self) -> None:
+        if self._bar is not None and self.maximum() > 0:
+            self._apply_determinate_style()
+
+    def _apply_determinate_style(self) -> None:
+        if self._bar is None:
+            return
+        from src.gui.theme import get_progress_chunk_color, get_progress_groove_color
+
+        chunk = QColor(get_progress_chunk_color())
+        light = chunk.lighter(135).name()
+        dark = chunk.darker(125).name()
+        mid = chunk.name()
+        self._bar.setStyleSheet(
+            "QProgressBar {"
+            f" background-color: {get_progress_groove_color()};"
+            " border: 1px solid rgba(0,0,0,0.25);"
+            " border-radius: 3px;"
+            " text-align: center;"
+            "}"
+            "QProgressBar::chunk {"
+            " background: qlineargradient("
+            "  x1:0, y1:0, x2:0, y2:1,"
+            f"  stop:0 {light},"
+            f"  stop:0.5 {mid},"
+            f"  stop:1 {dark}"
+            " );"
+            " border-radius: 2px;"
+            "}"
+        )
+
     def set_progress(self, completed: int, total: int, message: str = "") -> None:
         """Drive the bar from a ProgressSink. total=0 ⇒ indeterminate.
 
@@ -142,29 +173,7 @@ class AnimatedProgressDialog(QProgressDialog):
                 # something upstream had set a custom format string.
                 self._bar.setFormat("%p%")
                 self._bar.setTextVisible(True)
-                from src.gui.theme import get_progress_chunk_color, get_progress_groove_color
-
-                chunk = QColor(get_progress_chunk_color())
-                light = chunk.lighter(135).name()
-                dark = chunk.darker(125).name()
-                mid = chunk.name()
-                self._bar.setStyleSheet(
-                    "QProgressBar {"
-                    f" background-color: {get_progress_groove_color()};"
-                    " border: 1px solid rgba(0,0,0,0.25);"
-                    " border-radius: 3px;"
-                    " text-align: center;"
-                    "}"
-                    "QProgressBar::chunk {"
-                    " background: qlineargradient("
-                    "  x1:0, y1:0, x2:0, y2:1,"
-                    f"  stop:0 {light},"
-                    f"  stop:0.5 {mid},"
-                    f"  stop:1 {dark}"
-                    " );"
-                    " border-radius: 2px;"
-                    "}"
-                )
+                self._apply_determinate_style()
         if message:
             self.setLabelText(message)
 
@@ -374,6 +383,95 @@ class ApplyWorker(QThread):
             logger.exception("Apply to Game failed: %s", exc)
             self.error.emit(str(exc))
             self.completed.emit(False, {"cancelled": False})
+
+
+class LocPackExportWorker(QThread):
+    """Create an applied or shared loc-pack without blocking the UI."""
+
+    progress = pyqtSignal(str)
+    completed = pyqtSignal(str, int, int)  # path, source bytes, zip bytes
+    error = pyqtSignal(str)
+
+    def __init__(self, output_zip_path: Path, include_personal_edits: bool) -> None:
+        super().__init__()
+        self._output_zip_path = Path(output_zip_path)
+        self._include_personal_edits = include_personal_edits
+        self._active_channel = AppSettings.get_active_channel()
+        self._user_data_root = AppSettings.get_user_data_dir().resolve()
+
+    def _ensure_context_unchanged(self) -> None:
+        if (
+            AppSettings.get_active_channel() != self._active_channel
+            or AppSettings.get_user_data_dir().resolve() != self._user_data_root
+        ):
+            raise RuntimeError("The active channel or data folder changed during export. Please try again.")
+
+    def _ensure_output_is_not_source(self) -> None:
+        from src.utils.locpack_exporter import _ensure_output_is_not_input
+
+        channel_dir = self._user_data_root / self._active_channel
+        cache_dir = channel_dir / "cache"
+        protected_paths = [
+            AppSettings.get_global_ini_path(),
+            channel_dir / "user.ini",
+            cache_dir / "base.ini",
+        ]
+        for filename in AppSettings.ENHANCEMENTS_FILES.values():
+            protected_paths.extend((cache_dir / filename, cache_dir / f"{filename}.disabled"))
+        for source_name in AppSettings.AVAILABLE_SOURCES:
+            source_path = AppSettings.get_source_path(source_name)
+            if source_path and not source_path.startswith(("http://", "https://")):
+                protected_paths.append(Path(source_path))
+        _ensure_output_is_not_input(self._output_zip_path, protected_paths)
+
+    def run(self) -> None:
+        from src.utils.apply_engine import find_apply_base_file
+        from src.utils.locpack_exporter import write_locpack_zip, write_shared_locpack_zip
+
+        try:
+            self._ensure_context_unchanged()
+            self._ensure_output_is_not_source()
+            if self._include_personal_edits:
+                self.progress.emit("Packaging applied global.ini…")
+                source_path = AppSettings.get_global_ini_path()
+                source_size = write_locpack_zip(source_path, self._output_zip_path)
+            else:
+                from src.utils.string_loader import load_sources_from_settings
+
+                self.progress.emit("Loading shared export sources…")
+                sources, hierarchy, _ = load_sources_from_settings()
+                self._ensure_context_unchanged()
+                if not sources or AppSettings.SOURCE_GLOBAL not in sources:
+                    raise ValueError("No base localization source is available for shared export.")
+
+                cache_dir = AppSettings.get_cache_dir()
+                enabled_categories = AppSettings.get_enabled_enhancement_categories()
+                missing = [
+                    filename
+                    for category, filename in AppSettings.ENHANCEMENTS_FILES.items()
+                    if category in enabled_categories and not (cache_dir / filename).is_file()
+                ]
+                if missing:
+                    filenames = ", ".join(missing)
+                    raise FileNotFoundError(
+                        "Cannot create a complete shared loc-pack because enabled enhancement files are missing: "
+                        f"{filenames}. Generate Enhancements first."
+                    )
+
+                base_hierarchy = [AppSettings.SOURCE_GLOBAL]
+                source_paths = {AppSettings.SOURCE_GLOBAL: AppSettings.get_source_path(AppSettings.SOURCE_GLOBAL)}
+                base_file = find_apply_base_file(base_hierarchy, source_paths, cache_dir)
+                if base_file is None:
+                    raise FileNotFoundError("Base localization file not found. Extract localization before exporting.")
+
+                self.progress.emit("Merging base localization and enabled enhancements…")
+                source_size = write_shared_locpack_zip(base_file, sources, hierarchy, self._output_zip_path)
+
+            zip_size = self._output_zip_path.stat().st_size
+            self.completed.emit(str(self._output_zip_path), source_size, zip_size)
+        except Exception as exc:
+            logger.exception("Loc-pack export failed: %s", exc)
+            self.error.emit(str(exc))
 
 
 class StartupSyncWorker(QThread):

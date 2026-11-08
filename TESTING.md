@@ -37,7 +37,7 @@ use a disposable checkout: the sync changes its lockfile and environment.
 
 ```bash
 uv sync --all-groups --resolution lowest-direct
-uv run --locked --resolution lowest-direct python -m pytest tests/ -p no:xdist --tb=short -q
+uv run --locked --resolution lowest-direct python -m pytest tests/ -p no:xdist --tb=short -q --cov=src --cov-report=xml
 ```
 
 Keep the resolution option on both commands so the test run does not switch
@@ -47,30 +47,32 @@ back to the default resolution.
 
 ## Test Structure
 
-### Test files
+### Selected Test Files
 
-| File                                    | What it covers                                                                               |
-| --------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `test_core.py`                          | INI parsing, merging, StringEntry model, user INI management, stats integration              |
-| `test_ini_parser.py`                    | Full `ini_parser.py` coverage: source loading, `load_sources_from_settings`, exception paths |
-| `test_string_table_model.py`            | `StringTableModel`: data roles, flags, sort, filter, signals, Qt model compliance            |
-| `test_channel_layout.py`                | Per-channel directory layout and isolation                                                   |
-| `test_dataforge_patcher.py`             | DataForge enhancement patching logic                                                         |
-| `test_entry_filter.py`                  | Entry filter matching                                                                        |
-| `test_extracted_modules.py`             | Extracted module integration                                                                 |
-| `test_ini_parser.py`                    | INI parser edge cases                                                                        |
-| `test_missions.py`                      | Mission key handling and prefix detection                                                    |
-| `test_pak_extraction.py`                | P4K extraction pipeline, DataForge cache, filtered-copy helper                               |
-| `test_perf.py`                          | Performance utility helpers                                                                  |
-| `test_progress_sink.py`                 | Progress reporting                                                                           |
-| `test_retired_url_sources_migration.py` | Legacy URL source migration                                                                  |
-| `test_settings.py`                      | AppSettings persistence and defaults                                                         |
-| `test_updater.py`                       | Auto-update version checking                                                                 |
-| `test_user_cfg.py`                      | User config file handling                                                                    |
-| `test_user_ini_manager.py`              | User INI read/write                                                                          |
-| `test_version.py`                       | Version string parsing                                                                       |
-| `test_workers.py`                       | Qt worker thread signal contracts                                                            |
-| `test_frontend_version_stamp.py`        | `Frontend_PU_Version` watermark behaviour (11 tests)                                         |
+Representative modules are listed below; the complete automated suite is in `tests/`.
+
+| File                                    | What it covers                                                                    |
+| --------------------------------------- | --------------------------------------------------------------------------------- |
+| `test_core.py`                          | INI parsing, merging, StringEntry model, user INI management, stats integration   |
+| `test_ini_parser.py`                    | INI source loading, settings integration, and exception paths                     |
+| `test_string_table_model.py`            | `StringTableModel`: data roles, flags, sort, filter, signals, Qt model compliance |
+| `test_channel_layout.py`                | Per-channel directory layout and isolation                                        |
+| `test_dataforge_patcher.py`             | DataForge enhancement patching logic                                              |
+| `test_entry_filter.py`                  | Entry filter matching                                                             |
+| `test_extracted_modules.py`             | Extracted module integration                                                      |
+| `test_edge_cases.py`                    | Empty/malformed INI input and formatter edge cases                                |
+| `test_missions.py`                      | Mission key handling and prefix detection                                         |
+| `test_pak_extraction.py`                | P4K extraction pipeline, DataForge cache, filtered-copy helper                    |
+| `test_perf.py`                          | Performance utility helpers                                                       |
+| `test_progress_sink.py`                 | Progress reporting                                                                |
+| `test_retired_url_sources_migration.py` | Legacy URL source migration                                                       |
+| `test_settings.py`                      | AppSettings persistence and defaults                                              |
+| `test_updater.py`                       | Auto-update version checking                                                      |
+| `test_user_cfg.py`                      | User config file handling                                                         |
+| `test_user_ini_manager.py`              | User INI read/write                                                               |
+| `test_version.py`                       | Version string parsing                                                            |
+| `test_workers.py`                       | Qt worker thread signal contracts                                                 |
+| `test_frontend_version_stamp.py`        | `Frontend_PU_Version` watermark behaviour (11 tests)                              |
 
 ### Markers
 
@@ -114,11 +116,13 @@ uv run pytest tests/ --tb=short
    `dist/OpenStrings-1.5.3-Setup.exe`; confirm version 1.5.3. Local smoke builds may be unsigned or self-signed and are not release artifacts.
 2. Open the Log tab and pop it out before starting generation. Select PTU in Config,
    confirm the installed game path, and run Generate Enhancements. The first run
-   after updating regenerates enhancements; allow several minutes. Verify progress
-   continues and the log remains visible. Detailed progress belongs in the dialog,
-   while the Enhancements tab and status bar show only short activity summaries.
+   after updating regenerates enhancements; allow several minutes after any required
+   extraction. Verify the dialog shows current phase messages and overall progress,
+   and that the log remains visible. The Enhancements tab and status bar show short
+   activity summaries.
 3. Confirm successful integrity validation and generation, then return the log to
-   its tab. Check that earlier entries remain and appear only once.
+   its tab. Check that earlier entries remain and appear only once. With all
+   enhancement categories enabled, verify all 13 generated INIs are present.
 4. Enable **Armor & Suits** and confirm an armor or helmet description shows
    signature lines. Fractional reductions keep one decimal place.
 5. Check an FPS weapon with several fire modes (for example a rifle with auto and
@@ -130,12 +134,16 @@ uv run pytest tests/ --tb=short
    then re-enable it and confirm current output returns with saved overrides intact.
 8. Start a tool download from Config and press Esc or Cancel. The dialog shows
    "Cancelling…" and closes once the download stops.
-9. Select each body font, including Segoe UI, and confirm the selection takes effect and persists after restart. Check the enhancements category states are readable as Ready, Missing, or Off without relying on color.
+9. Select each body font, including Segoe UI, and confirm the selection takes effect and persists after restart. Confirm Default follows Windows light/dark appearance and refreshes when it changes; explicit Light and Dark remain fixed. Check enhancement category states are readable as Ready, Missing, or Off without relying on color.
 10. Restore a backup from the active channel. Confirm the current `global.ini` is backed up first and an unrelated INI file cannot be selected as a backup.
 11. Apply to Game and confirm its progress dialog stays responsive. If an enabled source is missing, decline the warning and confirm no game file is written.
 12. Close the app during a long background operation. If the worker has not stopped after the wait timeout, confirm the app remains open and can be closed after the task finishes.
-13. Resize the window and test at common Windows display-scaling settings. Confirm Config and Enhancements content remains reachable and text is legible.
-14. Switch between Basic and Advanced. In Basic, search keys and values, filter by category, edit a row and Apply. Clear Filters resets search and category. In Advanced, confirm all per-column filters and secondary actions return; restart and verify the chosen view persists.
+13. Resize the window and test at common Windows display-scaling settings. Confirm Config and Enhancements content remains reachable and text is legible; record the smallest usable window size.
+14. Switch between Basic and Advanced. In Basic, search keys and values, filter by category, edit a row and Apply. Confirm Clear Filters is visible and resets search and category. In Advanced, confirm all per-column filters and secondary actions return; restart and verify the chosen view persists.
+15. Install the same build over an existing installation. Confirm the previous uninstall finishes before files are replaced, Setup completes, and the new uninstall entry points to an existing `unins000.exe`. Verify user edits and backups remain.
+16. Export an Applied loc-pack and a Shared loc-pack. Confirm both ZIPs contain a root `global.ini`; Applied packages the current applied file, including its user edits. Shared includes base localization and enabled enhancements but excludes `user.ini` edits and the Open Strings version stamp. Confirm game files and source INIs remain unchanged. If an enabled enhancement file is missing, Shared export must fail clearly without creating a partial ZIP.
+17. For selected LIVE in-game rendering checks, deliberately Apply with a backup first, then inspect representative ship, component/weapon, armor, mission, and commodity enhancements. Restore the verified backup afterward and confirm the original game file is restored.
+18. Test optional "My edits and backups" cleanup only with a disposable user-data folder; verify unrelated shared files remain untouched.
 
 Repeat the generation checks on LIVE separately. Each channel has its own cache
 and requires its own first-run rebuild. Do not apply to the game during initial
@@ -173,7 +181,15 @@ uv run python src/main.py
    - `components_desc_enhancements.ini`
    - `ship_weapons_desc_enhancements.ini`
    - `fps_weapons_desc_enhancements.ini`
+   - `fps_attachments_enhancements.ini`
+   - `fps_armor_enhancements.ini`
+   - `ship_fuel_enhancements.ini`
+   - `countermeasure_enhancements.ini`
+   - `lifesupport_enhancements.ini`
    - `mission_rewards_enhancements.ini`
+   - `commodity_crafting_enhancements.ini`
+   - `journal_enhancements.ini`
+   - `missile_enhancements.ini`
 5. Search for `vehicle_Desc` and verify entries show stats (e.g., "Max Speed: 210 m/s")
 
 **Time**: First extraction can take tens of minutes; generation from a current cache is shorter.
@@ -210,18 +226,17 @@ uv run python src/main.py
 
 ## Test Coverage
 
-Coverage is measured automatically on every test run. GUI modules have Qt-based regression tests where practical and are supplemented by the manual workflows in `TESTPLAN.md`.
+Coverage is measured automatically on every test run. GUI modules have Qt-based regression tests where practical and are supplemented by the manual workflow in this guide. `TESTPLAN.md` is a retired 1.0-era archive and is not a current test source.
 
 ### Current Coverage
 
-| Area                       | Current expectation          |
-| -------------------------- | ---------------------------- |
-| Full suite                 | `uv run pytest` passes       |
-| Coverage floor             | 83% (`--cov-fail-under=83`)  |
-| Current development result | 1,261 tests, 88.10% coverage |
+| Area           | Current expectation         |
+| -------------- | --------------------------- |
+| Full suite     | `uv run pytest` passes      |
+| Coverage floor | 83% (`--cov-fail-under=83`) |
 
-The exact percentage naturally changes as code and tests evolve; rely on the full
-suite result rather than treating the development snapshot as a release requirement.
+Test counts and coverage naturally change as code and tests evolve; use the latest
+full-suite result rather than a fixed development snapshot.
 
 Coverage is uploaded as a `coverage.xml` artifact on every CI run (30-day retention).
 
@@ -299,9 +314,8 @@ uv run pytest tests/
 **Solution**: Ensure `src/` is in Python path:
 
 ```bash
-# pytest.ini already sets this, but if running manually:
-set PYTHONPATH=%CD%\src
-pytest tests/ -v
+# Run from the repository root; pyproject.toml configures `pythonpath = ["."]`.
+uv run pytest tests/ -q
 ```
 
 ### Issue: P4K extraction tests fail (tools not in assets/)
@@ -428,15 +442,15 @@ When adding new features, add tests:
 Use this template to document test runs:
 
 ````markdown
-# Test Results - v0.6.0 - [DATE]
+# Test Results - [Version] - [Date]
 
 **Tester**: [Name]  
-**Environment**: Windows 10/11, Python 3.10, PyQt6
+**Environment**: Windows, Python 3.12+, PyQt6
 
 ## Automated Tests
 
 ```bash
-pytest tests/ -v --tb=short
+uv run pytest -q tests/ --tb=short
 ```
 ````
 
@@ -452,8 +466,8 @@ pytest tests/ -v --tb=short
 
 ## Manual Tests
 
-**Checklist**: TESTING_CHECKLIST_v0.6.0.md  
-**Total Checks**: 120+  
+**Checklist**: [Manual Testing Workflow](TESTING.md#manual-testing-workflow)
+**Checks Performed**: [List applicable checks]
 **Passed**: \*\*  
 **Failed**: \*\*
 
@@ -494,8 +508,13 @@ uv run ruff check .
 uv run ruff format --check .
 uv run python -m mypy src/ scripts/generate_enhancements_ini.py
 
-# Tests (what CI runs)
-uv run pytest tests/ --cov=src --cov-report=xml
+# Highest dependency resolution (use a disposable checkout)
+uv sync --all-groups --resolution highest
+uv run --locked --resolution highest python -m pytest tests/ -p no:xdist --tb=short -q --cov=src --cov-report=xml
+
+# Lowest compatible direct dependencies (use a disposable checkout)
+uv sync --all-groups --resolution lowest-direct
+uv run --locked --resolution lowest-direct python -m pytest tests/ -p no:xdist --tb=short -q --cov=src --cov-report=xml
 ```
 
 ---
@@ -503,12 +522,12 @@ uv run pytest tests/ --cov=src --cov-report=xml
 ## Questions?
 
 - **Can't run tests?** Check `pytest --version` and ensure it's installed
-- **Test import errors?** Verify `src/` path is correct in `pytest.ini`
+- **Test import errors?** Run from the repository root and check `[tool.pytest.ini_options]` in `pyproject.toml`.
 - **Need help writing tests?** Look at existing tests in `test_core.py` for examples
 - **Found a bug?** Add a regression test that reproduces it, then fix the bug
 
 ---
 
-**Last Updated**: 2026-04-09
-**For Version**: 0.6.0 and later
+**Last Updated**: 2026-11-08
+**For Version**: 1.5.3
 ````

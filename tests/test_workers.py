@@ -763,6 +763,195 @@ class TestAnimatedProgressDialog:
         # validate the range is correct instead.
         assert dlg.minimum() == 0
 
+    def test_refresh_theme_updates_determinate_bar_style(self, qtbot, monkeypatch):
+        from src.gui import theme
+        from src.gui.workers import AnimatedProgressDialog
+
+        dlg = AnimatedProgressDialog("Working")
+        qtbot.addWidget(dlg)
+        dlg.set_progress(3, 10, "Scanning")
+        monkeypatch.setattr(theme, "get_progress_chunk_color", lambda: "#123456")
+        monkeypatch.setattr(theme, "get_progress_groove_color", lambda: "#654321")
+
+        dlg.refresh_theme()
+
+        assert dlg.maximum() == 10
+        assert dlg.value() == 3
+        assert "#123456" in dlg._bar.styleSheet()
+        assert "#654321" in dlg._bar.styleSheet()
+
+
+@pytest.mark.unit
+def test_shared_locpack_worker_rejects_missing_enabled_enhancement(monkeypatch, tmp_path):
+    from src.gui.workers import LocPackExportWorker
+    from src.utils import string_loader
+    from src.utils.settings import AppSettings
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    (cache_dir / "base.ini").write_text("stock=Base\n", encoding="utf-8")
+    monkeypatch.setattr(AppSettings, "get_active_channel", staticmethod(lambda: "LIVE"))
+    monkeypatch.setattr(AppSettings, "get_user_data_dir", staticmethod(lambda: tmp_path))
+    monkeypatch.setattr(AppSettings, "get_cache_dir", staticmethod(lambda: cache_dir))
+    monkeypatch.setattr(AppSettings, "get_enabled_enhancement_categories", staticmethod(lambda: {"ship_descs"}))
+    monkeypatch.setattr(
+        AppSettings, "get_source_path", staticmethod(lambda _source: "https://example.invalid/base.ini")
+    )
+    monkeypatch.setattr(
+        string_loader,
+        "load_sources_from_settings",
+        lambda: ({"global": {"stock": "Base"}, "user": {"stock": "Personal"}}, ["global", "user"], {}),
+    )
+    output = tmp_path / "shared.zip"
+    worker = LocPackExportWorker(output, include_personal_edits=False)
+    errors = []
+    worker.error.connect(errors.append)
+
+    worker.run()
+
+    assert len(errors) == 1
+    assert "ships_desc_enhancements.ini" in errors[0]
+    assert not output.exists()
+
+
+@pytest.mark.unit
+def test_shared_locpack_worker_refuses_to_overwrite_user_ini(monkeypatch, tmp_path):
+    from src.gui.workers import LocPackExportWorker
+    from src.utils import string_loader
+    from src.utils.settings import AppSettings
+
+    user_root = tmp_path / "user-data"
+    user_ini = user_root / "LIVE" / "user.ini"
+    user_ini.parent.mkdir(parents=True)
+    original_user_ini = b"personal=Keep me\n"
+    user_ini.write_bytes(original_user_ini)
+    cache_dir = user_root / "LIVE" / "cache"
+    cache_dir.mkdir()
+    (cache_dir / "base.ini").write_text("stock=Base\n", encoding="utf-8")
+    (cache_dir / "ships_desc_enhancements.ini").write_text("stock=Enhanced\n", encoding="utf-8")
+    game_global_ini = tmp_path / "game" / "global.ini"
+    game_global_ini.parent.mkdir()
+    game_global_ini.write_bytes(b"game=Keep me\n")
+    monkeypatch.setattr(AppSettings, "get_active_channel", staticmethod(lambda: "LIVE"))
+    monkeypatch.setattr(AppSettings, "get_user_data_dir", staticmethod(lambda: user_root))
+    monkeypatch.setattr(AppSettings, "get_global_ini_path", staticmethod(lambda: game_global_ini))
+    monkeypatch.setattr(AppSettings, "get_cache_dir", staticmethod(lambda: cache_dir))
+    monkeypatch.setattr(AppSettings, "get_enabled_enhancement_categories", staticmethod(lambda: {"ship_descs"}))
+    monkeypatch.setattr(
+        AppSettings,
+        "get_source_path",
+        staticmethod(lambda source: "https://example.invalid/base.ini" if source == "global" else str(user_ini)),
+    )
+    monkeypatch.setattr(
+        string_loader,
+        "load_sources_from_settings",
+        lambda: (
+            {"global": {"stock": "Base"}, "enhancements": {"stock": "Enhanced"}, "user": {"personal": "Keep me"}},
+            ["global", "enhancements", "user"],
+            {},
+        ),
+    )
+    worker = LocPackExportWorker(user_ini, include_personal_edits=False)
+    errors = []
+    worker.error.connect(errors.append)
+
+    worker.run()
+
+    assert len(errors) == 1
+    assert "must not overwrite an input file" in errors[0]
+    assert user_ini.read_bytes() == original_user_ini
+    assert game_global_ini.read_bytes() == b"game=Keep me\n"
+
+
+@pytest.mark.unit
+def test_locpack_worker_applied_mode_packages_existing_global_ini(monkeypatch, tmp_path):
+    import zipfile
+
+    from src.gui.workers import LocPackExportWorker
+    from src.utils.settings import AppSettings
+
+    source = tmp_path / "applied.ini"
+    source.write_bytes(b"key=Applied\n")
+    monkeypatch.setattr(AppSettings, "get_active_channel", staticmethod(lambda: "LIVE"))
+    monkeypatch.setattr(AppSettings, "get_user_data_dir", staticmethod(lambda: tmp_path))
+    monkeypatch.setattr(AppSettings, "get_global_ini_path", staticmethod(lambda: source))
+    output = tmp_path / "applied.zip"
+    worker = LocPackExportWorker(output, include_personal_edits=True)
+    results = []
+    worker.completed.connect(lambda *args: results.append(args))
+
+    worker.run()
+
+    with zipfile.ZipFile(output) as archive:
+        assert archive.namelist() == ["global.ini"]
+        assert archive.read("global.ini") == b"key=Applied\n"
+    assert results == [(str(output), len(b"key=Applied\n"), output.stat().st_size)]
+
+
+@pytest.mark.unit
+def test_locpack_worker_shared_mode_merges_enabled_sources_without_user(monkeypatch, tmp_path):
+    import zipfile
+
+    from src.gui.workers import LocPackExportWorker
+    from src.utils import string_loader
+    from src.utils.settings import AppSettings
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    base = cache_dir / "base.ini"
+    base.write_text(
+        "base_key=Stock\nshared_key=Stock\npersonal_key=Stock\nFrontend_PU_Version=StockVersion\n", encoding="utf-8"
+    )
+    (cache_dir / "ships_desc_enhancements.ini").write_text("shared_key=Enhanced\n", encoding="utf-8")
+    user_ini = tmp_path / "user.ini"
+    user_ini.write_text("personal_key=Personal edit\npersonal_only=Private value\n", encoding="utf-8")
+    game_global_ini = tmp_path / "game" / "global.ini"
+    game_global_ini.parent.mkdir()
+    game_global_ini.write_text("game_key=Unchanged\n", encoding="utf-8")
+    base_before = base.read_bytes()
+    user_before = user_ini.read_bytes()
+    game_before = game_global_ini.read_bytes()
+    sources = {
+        "global": {
+            "base_key": "Stock",
+            "shared_key": "Stock",
+            "personal_key": "Stock",
+            "Frontend_PU_Version": "StockVersion",
+        },
+        "enhancements": {"shared_key": "Enhanced"},
+        "user": {"personal_key": "Personal edit", "personal_only": "Private value"},
+    }
+    hierarchy = ["global", "enhancements", "user"]
+    monkeypatch.setattr(AppSettings, "get_active_channel", staticmethod(lambda: "LIVE"))
+    monkeypatch.setattr(AppSettings, "get_user_data_dir", staticmethod(lambda: tmp_path))
+    monkeypatch.setattr(AppSettings, "get_cache_dir", staticmethod(lambda: cache_dir))
+    monkeypatch.setattr(AppSettings, "get_enabled_enhancement_categories", staticmethod(lambda: {"ship_descs"}))
+    monkeypatch.setattr(
+        AppSettings, "get_source_path", staticmethod(lambda _source: "https://example.invalid/base.ini")
+    )
+    monkeypatch.setattr(string_loader, "load_sources_from_settings", lambda: (sources, hierarchy, {}))
+    output = tmp_path / "shared.zip"
+    worker = LocPackExportWorker(output, include_personal_edits=False)
+    errors = []
+    worker.error.connect(errors.append)
+
+    worker.run()
+
+    assert errors == []
+    with zipfile.ZipFile(output) as archive:
+        assert archive.namelist() == ["global.ini"]
+        exported = archive.read("global.ini").decode("utf-8")
+    assert "base_key=Stock" in exported
+    assert "shared_key=Enhanced" in exported
+    assert "personal_key=Stock" in exported
+    assert "Frontend_PU_Version=StockVersion" in exported
+    assert "Open Strings" not in exported
+    assert "Personal edit" not in exported
+    assert "personal_only" not in exported
+    assert base.read_bytes() == base_before
+    assert user_ini.read_bytes() == user_before
+    assert game_global_ini.read_bytes() == game_before
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Pending-edit snapshot / restore logic (MainWindow helpers)
