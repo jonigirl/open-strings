@@ -2,15 +2,17 @@
 
 import logging
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -33,7 +35,15 @@ class EnhancementsTab(QWidget):
         self.setup_ui()
 
     def setup_ui(self):
-        layout = QVBoxLayout(self)
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_area = QScrollArea(self)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        content = QWidget()
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
 
@@ -51,6 +61,8 @@ class EnhancementsTab(QWidget):
         layout.addWidget(self._build_enhancements_group())
         layout.addWidget(self._build_favorites_group())
         layout.addStretch()
+        scroll_area.setWidget(content)
+        outer_layout.addWidget(scroll_area)
 
     # ── Enhancements ─────────────────────────────────────────────────────────
 
@@ -65,6 +77,7 @@ class EnhancementsTab(QWidget):
         )
         enhancements_desc.setProperty("role", "secondary")
         enhancements_desc.setWordWrap(True)
+        enhancements_desc.setMinimumWidth(0)
         gl.addWidget(enhancements_desc)
 
         # Per-category checkbox + description + status dot
@@ -80,6 +93,7 @@ class EnhancementsTab(QWidget):
 
         self._enhancements_status_labels: dict = {}
         self._enhancements_checkboxes: dict = {}
+        self._enhancements_description_labels: dict = {}
         categories_layout = QVBoxLayout()
 
         for key, label in AppSettings.ENHANCEMENT_LABELS.items():
@@ -100,9 +114,10 @@ class EnhancementsTab(QWidget):
 
             desc = QLabel(_CATEGORY_DESCRIPTIONS.get(key, ""))
             desc.setProperty("role", "secondary")
-            row.addWidget(desc)
-
-            row.addStretch()
+            desc.setWordWrap(True)
+            desc.setMinimumWidth(0)
+            row.addWidget(desc, 1)
+            self._enhancements_description_labels[key] = desc
             categories_layout.addLayout(row)
 
         gl.addLayout(categories_layout)
@@ -116,8 +131,8 @@ class EnhancementsTab(QWidget):
         self._apply_categories_btn.clicked.connect(self._apply_category_changes)
         btn_row.addWidget(self._apply_categories_btn)
 
-        self._generate_enhancements_btn = QPushButton("Generate Enhancements")
-        self._generate_enhancements_btn.setMaximumWidth(160)
+        self._generate_enhancements_btn = QPushButton("Generate")
+        self._generate_enhancements_btn.setMaximumWidth(110)
         self._generate_enhancements_btn.setToolTip(
             "Generate enhanced localization files from your game's Data.p4k.\n"
             "DataForge data will be extracted automatically if not already cached\n"
