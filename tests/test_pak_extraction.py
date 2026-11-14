@@ -1142,10 +1142,13 @@ class TestDataForgeHealth:
         cache = tmp_path / "dataforge"
         self._write_required_xml(cache)
         progress = []
-        validate_dataforge_cache(cache, progress.append)
+        phase_progress = []
+        validate_dataforge_cache(cache, progress.append, lambda *args: phase_progress.append(args))
         assert progress[0] == "Checking cached DataForge records…"
         assert progress[1] == "Checking cached records: 0 / 2"
         assert progress[-1] == "Checking cached records: 2 / 2"
+        assert phase_progress[0] == (0, 2, "Checking cached records: 0 / 2")
+        assert phase_progress[-1] == (2, 2, "Checking cached records: 2 / 2")
 
     def _write_required_xml(self, cache: Path) -> None:
         records = cache / "raw" / "libs" / "foundry" / "records" / "entities"

@@ -306,7 +306,9 @@ def _validate_dataforge_export(dcb_path: Path, progress_callback=None) -> Path:
 
 
 def validate_dataforge_cache(
-    cache_dir: Path, progress_callback: Callable[[str], None] | None = None
+    cache_dir: Path,
+    progress_callback: Callable[[str], None] | None = None,
+    progress_pct_callback: Callable[[int, int, str], None] | None = None,
 ) -> DataForgeHealthReport:
     """Require usable essential XML and report incomplete exporter output."""
     records = cache_dir / DATAFORGE_PATCHED_DIR / "libs" / "foundry" / "records"
@@ -315,11 +317,18 @@ def validate_dataforge_cache(
     if progress_callback:
         progress_callback("Checking cached DataForge records…")
     files = sorted(records.rglob("*.xml"))
+    initial_progress = f"Checking cached records: 0 / {len(files):,}"
     if progress_callback:
-        progress_callback(f"Checking cached records: 0 / {len(files):,}")
+        progress_callback(initial_progress)
+    if progress_pct_callback:
+        progress_pct_callback(0, len(files), initial_progress)
     for index, xml_file in enumerate(files, start=1):
-        if progress_callback and index % _HEALTH_PROGRESS_INTERVAL == 0:
-            progress_callback(f"Checking cached records: {index:,} / {len(files):,}")
+        if index % _HEALTH_PROGRESS_INTERVAL == 0:
+            progress = f"Checking cached records: {index:,} / {len(files):,}"
+            if progress_callback:
+                progress_callback(progress)
+            if progress_pct_callback:
+                progress_pct_callback(index, len(files), progress)
         relative_path = xml_file.relative_to(records).as_posix()
         try:
             root = ET.parse(xml_file).getroot()
@@ -342,8 +351,11 @@ def validate_dataforge_cache(
     for subpath, count in counts.items():
         if count == 0:
             raise RuntimeError(f"DataForge health check failed: no usable XML files under required subtree {subpath}")
+    final_progress = f"Checking cached records: {len(files):,} / {len(files):,}"
     if progress_callback:
-        progress_callback(f"Checking cached records: {len(files):,} / {len(files):,}")
+        progress_callback(final_progress)
+    if progress_pct_callback:
+        progress_pct_callback(len(files), len(files), final_progress)
     return DataForgeHealthReport(xml_counts=counts, export_error_files=tuple(export_errors))
 
 
@@ -466,6 +478,7 @@ def rebuild_patched_dataforge_cache(
     patch_fingerprint: str,
     finalize_callback: Callable[[Path], None],
     progress_callback: Callable[[str], None] | None = None,
+    progress_pct_callback: Callable[[int, int, str], None] | None = None,
 ) -> bool:
     """Rebuild the patched ``raw`` tree from immutable ``pristine`` XML when patches change."""
     _recover_dataforge_layer(cache_dir, DATAFORGE_PATCHED_DIR)
@@ -481,7 +494,7 @@ def rebuild_patched_dataforge_cache(
     try:
         shutil.copytree(pristine_libs, staging_root / DATAFORGE_PATCHED_DIR / "libs")
         finalize_callback(staging_root)
-        health = validate_dataforge_cache(staging_root, progress_callback)
+        health = validate_dataforge_cache(staging_root, progress_callback, progress_pct_callback)
         logger.info("DataForge patched-cache health check passed: %s", health.summary_line())
         _replace_dataforge_cache(staging_root / DATAFORGE_PATCHED_DIR, cache_dir / DATAFORGE_PATCHED_DIR)
         identity["patch_fingerprint"] = patch_fingerprint
@@ -954,7 +967,7 @@ def extract_dataforge(
             if finalize_callback is not None:
                 finalize_callback(staging_dir)
             logger.info("Checking staged DataForge cache health")
-            health = validate_dataforge_cache(staging_dir, progress_callback)
+            health = validate_dataforge_cache(staging_dir, progress_callback, progress_pct_callback)
             logger.info("DataForge health check passed: %s", health.summary_line())
             _replace_dataforge_cache(staging_dir, dataforge_cache_dir)
             logger.info(f"DataForge cache written to {dataforge_cache_dir}")

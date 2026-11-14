@@ -250,10 +250,11 @@ class StartupFlowManager(QObject):
 
         checkboxes: dict[str, QCheckBox] = {}
         for key, label in AppSettings.ENHANCEMENT_LABELS.items():
-            cb = QCheckBox(label)
+            checkbox_label = label.replace("&", "&&")
+            cb = QCheckBox(checkbox_label)
             if key in missing_checkbox_keys:
                 cb.setChecked(True)
-                cb.setText(f"{label}  (missing)")
+                cb.setText(f"{checkbox_label}  (missing)")
             else:
                 cb.setChecked(False)
             checkboxes[key] = cb

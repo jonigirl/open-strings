@@ -630,6 +630,60 @@ def _mission_loc_key(root: ET.Element) -> str | None:
     return None
 
 
+_MISSION_COOLDOWN_LABELS = ("Personal cooldown", "Abandoned cooldown")
+
+
+def _record_mission_cooldowns(
+    cooldowns_by_key: dict[str, dict[str, set[str | None]]],
+    desc_key: str,
+    availability: ET.Element | None,
+) -> None:
+    details = cooldowns_by_key.setdefault(desc_key, {label: set() for label in _MISSION_COOLDOWN_LABELS})
+    record_details = _enh_formatters._mission_cooldown_details(availability) if availability is not None else {}
+    for label in _MISSION_COOLDOWN_LABELS:
+        details[label].add(record_details.get(label))
+
+
+def _append_mission_cooldowns(
+    out: dict[str, str],
+    mission_dir: Path,
+    loc: dict[str, str],
+    cooldowns_by_key: dict[str, dict[str, set[str | None]]] | None = None,
+) -> None:
+    if cooldowns_by_key is None:
+        cooldowns_by_key = {}
+    if mission_dir.exists():
+        for xml_file in mission_dir.rglob("*.xml"):
+            try:
+                root = ET.parse(xml_file).getroot()
+            except ET.ParseError:
+                continue
+            desc_key = _mission_loc_key(root)
+            if desc_key:
+                _record_mission_cooldowns(cooldowns_by_key, desc_key, root)
+
+    for desc_key, details in cooldowns_by_key.items():
+        base_value = out.get(desc_key, loc.get(desc_key))
+        if base_value is None:
+            continue
+
+        cooldown_lines = []
+        for label, values in details.items():
+            present_values = sorted(value for value in values if value is not None)
+            if not present_values:
+                continue
+            varies = len(values) > 1
+            display_label = f"{label} (varies by variant)" if varies else label
+            value_text = "; ".join(present_values)
+            if None in values:
+                value_text += "; not enabled for some variants"
+            cooldown_lines.append(f"<EM4>{display_label}:</EM4> {value_text}")
+
+        if cooldown_lines:
+            section = "<EM3>MISSION COOLDOWNS</EM3>\\n" + "\\n".join(cooldown_lines)
+            out[desc_key] = f"{base_value}\\n\\n{section}"
+
+
 _FPS_TOKENS = (
     "_fps",
     "fps_",
@@ -1357,6 +1411,7 @@ def scan_contract_generators(
     *,
     temporary_blueprints: dict | None = None,
     vehicle_rentals: dict | None = None,
+    mission_cooldowns: dict[str, dict[str, set[str | None]]] | None = None,
 ):
     """Scan contract generator XMLs for mission variants with different systems.
 
@@ -1524,6 +1579,9 @@ def scan_contract_generators(
 
                             if not title_key:
                                 continue
+
+                            if mission_cooldowns is not None and desc_key:
+                                _record_mission_cooldowns(mission_cooldowns, desc_key, da)
 
                             # Extract blueprint pool UUID and drop chance if present.
                             # Record the pool under the variant's system_name
@@ -3174,6 +3232,7 @@ def main(
         contractgen_dir = records / "contracts" / "contractgenerator"
         temporary_blueprints: dict = {}
         vehicle_rentals: dict = {}
+        mission_cooldowns: dict[str, dict[str, set[str | None]]] = {}
         contractgen_missions, mission_blueprints, mission_bp_chance, mission_items = scan_contract_generators(
             contractgen_dir,
             reputation_lookup,
@@ -3182,6 +3241,7 @@ def main(
             pool_names=pool_names,
             temporary_blueprints=temporary_blueprints,
             vehicle_rentals=vehicle_rentals,
+            mission_cooldowns=mission_cooldowns,
         )
         logger.info(
             f"Processed {len(contractgen_missions)} contract generator mission variants, {len(mission_blueprints)} with blueprints, {len(mission_items)} with items"
@@ -3570,6 +3630,7 @@ def main(
         for reason, keys in titles_skipped_reasons.items():
             if keys:
                 logger.info(f"  Skipped ({reason}): {len(keys)} — e.g. {', '.join(keys[:5])}")
+        _append_mission_cooldowns(out, pu_missions_dir, loc or {}, mission_cooldowns)
         _flush()
         return out
 

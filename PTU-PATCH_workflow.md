@@ -36,6 +36,7 @@ For each generated INI, compare the new PTU output with the previous PTU output 
 - Record added, removed, and changed keys.
 - Confirm every emitted key exists in the PTU base localization unless the feature explicitly supports enhancement-only keys.
 - Review changed values against their source fields and formatter behavior; do not infer semantics from names alone.
+- For mission cooldowns, check enable flags and configured variations, identify description keys with variant-specific values, and confirm units before accepting the output.
 - Classify unknown tag values, unmatched commodity names, and other compatibility warnings as supported, out of scope, ambiguous, or unresolved.
 - Check whether a difference comes from the game patch, changed generator source, or changed settings before attributing it.
 
@@ -47,6 +48,7 @@ Using the current local Open Strings test build:
 - Confirm the table loads, Basic and Advanced modes behave as intended, and search/reset works.
 - Confirm all enabled enhancement categories report Ready, Missing, or Off as appropriate.
 - Check selected changed enhancement entries in the preview for readable, non-duplicated output.
+- Check a mission description with cooldown data and confirm only enabled personal/abandoned timers appear with their configured variations.
 - Exercise Apply/Restore only when deliberately testing that workflow; verify a backup and restore the original game file.
 
 ## Completion Record

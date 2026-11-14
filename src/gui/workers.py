@@ -565,7 +565,11 @@ class EnhancementsGeneratorWorker(QThread):
                         logger.warning(f"  patch error: {err}")
 
             patched_rebuilt = rebuild_patched_dataforge_cache(
-                forge_dir, patch_fingerprint, _apply_patches, self.progress.emit
+                forge_dir,
+                patch_fingerprint,
+                _apply_patches,
+                self.progress.emit,
+                lambda completed, total, message: self.progress_pct.emit(completed, total, message),
             )
             if not patched_rebuilt:
                 _apply_patches(forge_dir)

@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Weapons whose fire modes have different rates list the rate for each mode.
 - Underbarrel flashlight descriptions show linked beam radius, intensity, and
   named tint when available.
+- Shared localization export excludes personal edits and the version stamp.
+- Mission descriptions show enabled personal and abandoned cooldowns, including
+  configured variations and variant-specific values.
 
 ### Fixed
 
@@ -55,6 +58,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Help, About, and preview content follow the selected body font.
 - Basic and Advanced String Editor views provide a focused global search or the
   complete filter and secondary-action set, respectively.
+- Same-version upgrades wait for the previous uninstaller to finish before installing.
+- Enhancement category descriptions wrap and remain reachable in narrow windows.
+- Enhancement category labels render ampersands literally.
+- Cached-record health checks show determinate progress.
+- Tool downloads retry transient failures and provide clearer guidance for
+  unavailable assets and temporary server errors.
 
 ### Changed
 
@@ -65,6 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   enhancement generator.
 - Source reload and Apply-to-Game processing run in a worker instead of blocking
   the UI thread.
+- The Default theme follows the Windows light or dark appearance.
 - The app stays open if a background worker does not stop within the close timeout.
 - Correction to the 1.4.0 and 1.4.1 entries: the `EnhancementPipeline` class is
   incomplete and not used for generation, and mypy did not pass on the application

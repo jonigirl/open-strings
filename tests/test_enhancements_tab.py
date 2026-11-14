@@ -44,6 +44,12 @@ def test_missing_enhancement_files_have_textual_status(tab):
     assert widget._enhancements_status_labels[key].text() == "Missing"
 
 
+def test_armor_category_displays_literal_ampersand(tab):
+    widget, _cache = tab
+
+    assert widget._enhancements_checkboxes["armor"].text() == "Armor && Suits"
+
+
 def test_disabled_enhancement_category_reports_off(tab, monkeypatch):
     widget, _cache = tab
     key = next(iter(widget._enhancements_status_labels))

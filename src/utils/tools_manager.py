@@ -7,9 +7,13 @@ import ssl
 import sys
 import tempfile
 import threading
+import time
 import urllib.request
 import zipfile
+from collections.abc import Callable
+from http.client import IncompleteRead
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 
 from src.utils.file_utils import atomic_write_bytes
 
@@ -26,6 +30,9 @@ _UNP4K_SHA256 = "7c2b9f0f8a985c8f3e8dac07d6521f477757cf3f2bbb4cb0bdad5980e63fdfc
 _BASE_URL = f"https://github.com/dolkensp/unp4k/releases/download/{_UNP4K_VERSION}"
 _UNP4K_ZIP_URL = f"{_BASE_URL}/unp4k-win-x64-{_UNP4K_VERSION}.zip"
 _UNFORGE_ZIP_URL = f"https://github.com/jonigirl/open-strings/releases/download/{_CUSTOM_TOOL_RELEASE}/unforge-openstrings-{TOOLS_VERSION}-win-x64.zip"
+_UNP4K_ASSET_API_URL = "https://api.github.com/repos/dolkensp/unp4k/releases/assets/427794604"
+_UNFORGE_ASSET_API_URL = "https://api.github.com/repos/jonigirl/open-strings/releases/assets/623494613"
+_DOWNLOAD_ATTEMPTS = 3
 
 
 def get_tools_dir() -> Path:
@@ -56,13 +63,15 @@ def get_bundled_unforge_package() -> Path | None:
 
 
 def download_tools(
-    progress_callback=None,
+    progress_callback: Callable[[str], None] | None = None,
     cancel_event: threading.Event | None = None,
 ) -> None:
     """Download and extract unp4k and unforge into the tools directory.
 
     Downloads upstream unp4k and the digest-pinned patched unforge package,
     extracts them (preserving directory structure) into :func:`get_tools_dir`.
+    Transient failures are retried up to three attempts, using the same pinned
+    release asset through GitHub's asset API after the first failure.
 
     Args:
         progress_callback: Optional ``callable(str)`` called with a
@@ -78,12 +87,10 @@ def download_tools(
     tools_dir = get_tools_dir()
     tools_dir.mkdir(parents=True, exist_ok=True)
 
-    _CHUNK = 65536
-
-    # (label, zip_url, actual_exe_name) — unforge ships as unforge.cli.exe, not unforge.exe
-    for name, url, exe_name, expected_sha256 in [
-        ("unp4k", _UNP4K_ZIP_URL, "unp4k.exe", _UNP4K_SHA256),
-        ("unforge", _UNFORGE_ZIP_URL, "unforge.cli.exe", _UNFORGE_SHA256),
+    # unforge ships as unforge.cli.exe, not unforge.exe.
+    for name, url, api_url, exe_name, expected_sha256 in [
+        ("unp4k", _UNP4K_ZIP_URL, _UNP4K_ASSET_API_URL, "unp4k.exe", _UNP4K_SHA256),
+        ("unforge", _UNFORGE_ZIP_URL, _UNFORGE_ASSET_API_URL, "unforge.cli.exe", _UNFORGE_SHA256),
     ]:
         if cancel_event and cancel_event.is_set():
             raise RuntimeError("Download cancelled")
@@ -108,33 +115,11 @@ def download_tools(
         _report(progress_callback, f"Downloading {name}…")
         logger.info(f"Downloading {name} from {url}")
 
-        if not url.startswith("https://"):
-            raise ValueError(f"Only HTTPS URLs are accepted for downloads; got: {url!r}")
-
         tmp_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp_file:
                 tmp_path = Path(tmp_file.name)
-                with urllib.request.urlopen(url, timeout=60, context=ssl.create_default_context()) as response:
-                    total = int(response.headers.get("Content-Length") or 0)
-                    downloaded = 0
-                    while True:
-                        if cancel_event and cancel_event.is_set():
-                            raise RuntimeError("Download cancelled")
-                        chunk = response.read(_CHUNK)
-                        if not chunk:
-                            break
-                        tmp_file.write(chunk)
-                        downloaded += len(chunk)
-                        mb_done = downloaded // (1024 * 1024)
-                        if total:
-                            mb_total = total // (1024 * 1024)
-                            _report(
-                                progress_callback,
-                                f"Downloading {name}… {mb_done} / {mb_total} MB",
-                            )
-                        else:
-                            _report(progress_callback, f"Downloading {name}… {mb_done} MB")
+            _download_tool_archive(name, url, api_url, tmp_path, progress_callback, cancel_event)
 
             with tmp_path.open("rb") as archive:
                 digest = hashlib.file_digest(archive, "sha256").hexdigest()
@@ -154,6 +139,76 @@ def download_tools(
                     tmp_path.unlink()
                 except OSError:
                     pass
+
+
+def _download_tool_archive(
+    name: str,
+    url: str,
+    api_url: str,
+    tmp_path: Path,
+    progress_callback: Callable[[str], None] | None,
+    cancel_event: threading.Event | None,
+) -> None:
+    for candidate in (url, api_url):
+        if not candidate.startswith("https://"):
+            raise ValueError(f"Only HTTPS URLs are accepted for downloads; got: {candidate!r}")
+
+    context = ssl.create_default_context()
+    for attempt in range(_DOWNLOAD_ATTEMPTS):
+        if cancel_event and cancel_event.is_set():
+            raise RuntimeError("Download cancelled")
+        request = (
+            url if attempt == 0 else urllib.request.Request(api_url, headers={"Accept": "application/octet-stream"})
+        )
+        try:
+            with (
+                urllib.request.urlopen(request, timeout=60, context=context) as response,
+                tmp_path.open("wb") as tmp_file,
+            ):
+                total = int(response.headers.get("Content-Length") or 0)
+                downloaded = 0
+                while True:
+                    if cancel_event and cancel_event.is_set():
+                        raise RuntimeError("Download cancelled")
+                    chunk = response.read(65536)
+                    if not chunk:
+                        break
+                    tmp_file.write(chunk)
+                    downloaded += len(chunk)
+                    mb_done = downloaded // (1024 * 1024)
+                    if total:
+                        _report(progress_callback, f"Downloading {name}… {mb_done} / {total // (1024 * 1024)} MB")
+                    else:
+                        _report(progress_callback, f"Downloading {name}… {mb_done} MB")
+                if total and downloaded < total:
+                    raise IncompleteRead(b"", total - downloaded)
+            return
+        except (URLError, TimeoutError, ConnectionError, IncompleteRead) as error:
+            if isinstance(error, HTTPError):
+                error.close()
+                if error.code not in (500, 502, 503, 504):
+                    raise
+            if cancel_event and cancel_event.is_set():
+                raise RuntimeError("Download cancelled") from error
+            if attempt + 1 == _DOWNLOAD_ATTEMPTS:
+                raise
+            delay = 2**attempt
+            logger.warning(
+                "%s download attempt %d/%d failed (%s); retrying via GitHub's asset API in %ds",
+                name,
+                attempt + 1,
+                _DOWNLOAD_ATTEMPTS,
+                error,
+                delay,
+            )
+            _report(
+                progress_callback,
+                f"Retrying {name}… attempt {attempt + 2}/{_DOWNLOAD_ATTEMPTS} via GitHub's asset API in {delay}s",
+            )
+            if cancel_event is None:
+                time.sleep(delay)
+            elif cancel_event.wait(delay):
+                raise RuntimeError("Download cancelled") from error
 
 
 def _install_tool_archive(

@@ -98,7 +98,7 @@ class EnhancementsTab(QWidget):
 
         for key, label in AppSettings.ENHANCEMENT_LABELS.items():
             row = QHBoxLayout()
-            cb = QCheckBox(label)
+            cb = QCheckBox(label.replace("&", "&&"))
             cb.setChecked(AppSettings.get_enhancement_category_enabled(key))
             cb.toggled.connect(self._on_category_checkbox_changed)
             row.addWidget(cb)

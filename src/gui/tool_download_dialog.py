@@ -120,12 +120,23 @@ class ToolDownloadDialog(QDialog):
 
     def _on_error(self, message: str) -> None:
         tools_dir = get_tools_dir()
+        if "HTTP Error 404" in message:
+            hint = (
+                "HTTP 404 means the requested release asset is unavailable.\n"
+                "It does not necessarily indicate a firewall or antivirus problem.\n\n"
+            )
+        elif any(f"HTTP Error {code}" in message for code in (500, 502, 503, 504)):
+            hint = (
+                "The download server is temporarily unavailable (gateway error).\n"
+                "This is usually transient. Wait a minute and try again.\n\n"
+            )
+        else:
+            hint = ""
         QMessageBox.warning(
             self,
             "Download Failed",
             f"Could not download tools:\n\n{message}\n\n"
-            "HTTP 404 means the requested release asset is unavailable.\n"
-            "It does not necessarily indicate a firewall or antivirus problem.\n\n"
+            f"{hint}"
             f"This build requires patched tool version {TOOLS_VERSION}.\n"
             "The standard upstream unforge is not a compatible replacement.\n\n"
             f"Required patched package:\n{_UNFORGE_ZIP_URL}\n\n"

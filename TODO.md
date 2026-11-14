@@ -12,6 +12,7 @@ Complete these gates in order. Use the current manual workflow in [TESTING.md](T
 
 - [x] Build a fresh local smoke installer from committed `main` (2026-11-07); verify its bundled files and checksums.
 - [x] Rebuild a local smoke installer after the Enhancements narrow-layout fix (2026-11-08); this remains a self-signed/unsigned test artifact, not a release build.
+- [x] Rebuild the local 1.5.3 smoke installer after cooldown and visual fixes (2026-11-14); the app is self-signed, the installer is unsigned, and no patched tool ZIP is bundled. This is not a release artifact.
 - [x] Install and same-build upgrade the smoke build (2026-11-07, regular profile by user approval; not disposable). Verified version 1.5.3.0, custom data-folder setting, and 3 user INIs/11 backups remain. The installer handoff selects LIVE; the app rebuilt LIVE `base.ini` and loaded 90,615 entries.
 - [x] Rebuild PTU caches and generate enhancements in the installed app (2026-11-07): extracted `base.ini` (91,210 stock strings), validated 118,056 exported records and 31,573 cached records, published `raw`/`pristine` DataForge layers, generated all 13 INIs (5,461 entries), and reloaded 90,879 strings. Compatibility report lists 49 unknown tag values for review. After reinstall on 2026-11-08, regenerated the 13 INIs from the preserved PTU DataForge cache.
 - [x] Confirm PTU DataForge reports up to date and all 13 enhancement INIs are present after regeneration (2026-11-08).
@@ -19,11 +20,12 @@ Complete these gates in order. Use the current manual workflow in [TESTING.md](T
 - [x] Verify font options in the installed app (2026-11-08): selected Segoe UI and OpenDyslexic, restored Atkinson Hyperlegible, and confirmed Atkinson persisted after restart.
 - [x] Apply and restore PTU `global.ini` (2026-11-08): Apply created a backup; Restore used that verified backup and the game file returned to its original SHA-256. The five-backup cap pruned the two oldest backups as expected.
 - [x] Run the current test build against LIVE and PTU data and Apply to both game channels (2026-11-08; user-confirmed). User confirms both applied files are fine and has backups for emergency recovery; no restoration requested.
+- [x] User reports testing the local 1.5.3 build against current LIVE and PTU (2026-11-14). This confirms a smoke test only; compatibility work for the newly released PTU is deferred until after the 1.5.3 release.
 - [x] Decline the missing-source Apply warning in PTU (2026-11-08): Apply canceled, the game-file SHA-256 and backup count were unchanged, and the original PTU `base.ini` cache hash was restored.
 - [x] Verify enhancement category states are readable as text without relying on color (2026-11-08): installed UI showed all seven `Missing` labels clearly within their bounds; Qt tests verify `Ready`, `Missing`, and `Off` text and accessible descriptions. Visual check was on LIVE; PTU output states were not rechecked.
 - [x] Verify close deferral during a long operation (2026-11-08): sent `WM_CLOSE` during LIVE DataForge extraction; the app stayed responsive and continued. After extraction and validation completed, DataForge reported up to date and the app closed normally after a second `WM_CLOSE`. No Apply occurred.
 - [x] Verify common resolutions and display scaling (2026-11-08): user confirmed the prior check passed; exact window dimensions were not recorded.
-- [ ] Verify the updated Enhancements narrow layout in the rebuilt test app; category descriptions must wrap and controls remain fully visible.
+- [ ] Manually verify the rebuilt test app's Enhancements tab at a narrow window size: descriptions wrap, controls do not overlap or clip, and Favorites remains reachable by scrolling. The 376x512 automated test passes.
 - [x] Resolve the Basic reset-control mismatch (2026-11-08): keep `Clear Filters` visible in Basic; focused tests pass and the user confirmed the installed behavior.
 - [x] Fix and regression-test the same-build upgrade stale-uninstaller bug (2026-11-08): run the old uninstall in `InitializeSetup`, wait for registry removal and the detached uninstaller's completion marker, and stop setup on failure/timeout. Inno Setup 6.7.3 compile and same-build upgrade passed; the new `unins000.exe` remained valid and no active uninstall temp folder remained. All 14 user files remained; 13 hashes matched, while LIVE `user.ini` was rewritten on app close with its 12 entries and length unchanged. Stale HKLM cleanup now fails closed if the entry remains; permission-denied runtime behavior is not tested.
 - [x] Test default uninstall/reinstall in the regular profile (2026-11-08): settings JSON, all 14 user files, 11 backups, tools, and DataForge cache remained. Thirteen user-file/backup hashes matched the pre-uninstall snapshot; LIVE `user.ini` was rewritten on app close but kept its 12 entries and length. Reinstalled 1.5.3, restored PTU, and regenerated its outputs.
@@ -32,8 +34,17 @@ Complete these gates in order. Use the current manual workflow in [TESTING.md](T
 - [ ] After each meaningful PTU patch, compare localization and generated outputs with the previous baseline; resolve release-impacting data differences without repeating checks for an unchanged patch.
 - [x] Create `PTU-PATCH_workflow.md` for repeatable PTU-to-prior-PTU and PTU-to-LIVE validation (2026-11-08).
 - [x] Create `LIVE-PATCH_workflow.md` for repeatable LIVE-to-prior-LIVE and LIVE-to-PTU validation and test-build release-readiness checks (2026-11-08).
-- [ ] When 4.10.3 reaches LIVE, extract LIVE data, compare it with PTU, validate generated enhancements, and complete the LIVE smoke test, including selected in-game rendering checks.
-- [ ] Prepare the 1.5.3 release only after PTU and LIVE validation is complete and release-impacting issues are resolved.
+- [x] Validate current LIVE data for the 1.5.3 candidate (2026-11-14): the current base and all 13 enhancement outputs exist, and the parser found no generated keys missing from the base. Exact patch identity and counts are kept in private test notes.
+- [x] Add enabled personal and abandoned-contract cooldown details, including variation values, to mission enhancements; shared descriptions with differing timers are labeled as variant-specific.
+- [ ] Confirm cooldown units and runtime meaning before release; the current display labels values as minutes based on the LIVE data scale.
+- [x] Waive previous-LIVE and pre-5.0 PTU comparisons for 1.5.3 by user decision (2026-11-14): the old PTU data was removed when the new PTU data replaced it, and missing these comparisons is accepted for this release. Do not claim the new PTU is compatible.
+- [ ] Review the current LIVE fallback report for release impact; do not assume the previous patch's classification applies to the current report.
+- [x] Fix the Enhancements category label rendering in the tab and startup prompt by escaping the Qt ampersand mnemonic; the checkbox displays `Armor & Suits` as literal text.
+- [x] Make DataForge cached-record health checks report determinate progress through the same styled bar used for other measured phases.
+- [ ] Complete selected in-game rendering checks for representative ship, component/weapon, armor, mission, and commodity enhancements. The user's smoke-test confirmation did not specify these selections.
+- [ ] Manually verify the rebuilt app's literal `Armor & Suits` label, narrow Enhancements layout, and determinate cached-record progress bar; automated tests pass, but the latest build has not been visually checked.
+- [x] Include the current tool-download changes in the 1.5.3 candidate; the combined worktree passes the full test suite, Ruff, formatting, and mypy. Rebuild after the remaining sign-off checks.
+- [ ] Prepare the 1.5.3 release after the remaining manual LIVE checks and review/acceptance of current fallback risks. The historical comparison gap is explicitly waived for this release; compatibility with the new PTU patch remains out of scope until after 1.5.3.
 
 ## Deferred Work
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import xml.etree.ElementTree as ET
 
 from src.utils.dataforge_xml import attr as _attr
@@ -470,6 +471,45 @@ def enhancements_radar(root: ET.Element) -> str:
         lines.append(f"Component HP: {_fmt(comp_hp)}")
 
     return "\\n".join(lines) if lines else ""
+
+
+def _format_mission_cooldown(value: str | None, variation: str | None) -> str | None:
+    if value is None:
+        return None
+    try:
+        minutes = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(minutes) or minutes <= 0:
+        return None
+
+    decimals = 0 if minutes.is_integer() else 1
+    result = _fmt(minutes, " min", decimals)
+    if variation is None:
+        return result
+    try:
+        variation_minutes = float(variation)
+    except (TypeError, ValueError):
+        return result
+    if math.isfinite(variation_minutes) and variation_minutes > 0:
+        decimals = 0 if variation_minutes.is_integer() else 1
+        result += f" (variation: {_fmt(variation_minutes, ' min', decimals)})"
+    return result
+
+
+def _mission_cooldown_details(root: ET.Element) -> dict[str, str]:
+    details = {}
+    if root.get("hasPersonalCooldown") == "1":
+        cooldown = _format_mission_cooldown(root.get("personalCooldownTime"), root.get("personalCooldownTimeVariation"))
+        if cooldown:
+            details["Personal cooldown"] = cooldown
+    if root.get("canReacceptAfterAbandoning") == "1":
+        cooldown = _format_mission_cooldown(
+            root.get("abandonedCooldownTime"), root.get("abandonedCooldownTimeVariation")
+        )
+        if cooldown:
+            details["Abandoned cooldown"] = cooldown
+    return details
 
 
 def enhancements_mission(root: ET.Element, reputation_lookup: dict[str, int] | None = None) -> str:

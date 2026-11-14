@@ -118,8 +118,9 @@ uv run pytest tests/ --tb=short
    confirm the installed game path, and run Generate Enhancements. The first run
    after updating regenerates enhancements; allow several minutes after any required
    extraction. Verify the dialog shows current phase messages and overall progress,
-   and that the log remains visible. The Enhancements tab and status bar show short
-   activity summaries.
+   including determinate progress while validating exported records and checking
+   cached records, and that the log remains visible. The Enhancements tab and status
+   bar show short activity summaries.
 3. Confirm successful integrity validation and generation, then return the log to
    its tab. Check that earlier entries remain and appear only once. With all
    enhancement categories enabled, verify all 13 generated INIs are present.
@@ -127,18 +128,21 @@ uv run pytest tests/ --tb=short
    signature lines. Fractional reductions keep one decimal place.
 5. Check an FPS weapon with several fire modes (for example a rifle with auto and
    semi-auto). Differing rates are listed per mode.
-6. Check a ship description, temporary blueprint mission access, and a vehicle
-   rental description. Temporary access must not be labelled as permanent blueprint
-   ownership; rentals must include their duration.
+6. Check a mission description with cooldown data, a ship description, temporary
+   blueprint mission access, and a vehicle rental description. Confirm enabled
+   personal and abandoned cooldown settings include their variations, and note
+   whether the displayed time unit matches game behavior. Temporary access must
+   not be labelled as permanent blueprint ownership; rentals must include their duration.
 7. Disable a category and regenerate. Confirm it does not force a full rebuild,
    then re-enable it and confirm current output returns with saved overrides intact.
 8. Start a tool download from Config and press Esc or Cancel. The dialog shows
-   "Cancelling…" and closes once the download stops.
+   "Cancelling…" and closes once the download stops. For transient server errors,
+   confirm retry progress and distinguishable server-error guidance.
 9. Select each body font, including Segoe UI, and confirm the selection takes effect and persists after restart. Confirm Default follows Windows light/dark appearance and refreshes when it changes; explicit Light and Dark remain fixed. Check enhancement category states are readable as Ready, Missing, or Off without relying on color.
 10. Restore a backup from the active channel. Confirm the current `global.ini` is backed up first and an unrelated INI file cannot be selected as a backup.
 11. Apply to Game and confirm its progress dialog stays responsive. If an enabled source is missing, decline the warning and confirm no game file is written.
 12. Close the app during a long background operation. If the worker has not stopped after the wait timeout, confirm the app remains open and can be closed after the task finishes.
-13. Resize the window and test at common Windows display-scaling settings. Confirm Config and Enhancements content remains reachable and text is legible; record the smallest usable window size.
+13. Resize the window and test at common Windows display-scaling settings. Confirm Config and Enhancements content remains reachable and text is legible, the category displays `Armor & Suits` literally, and descriptions wrap without clipping; record the smallest usable window size.
 14. Switch between Basic and Advanced. In Basic, search keys and values, filter by category, edit a row and Apply. Confirm Clear Filters is visible and resets search and category. In Advanced, confirm all per-column filters and secondary actions return; restart and verify the chosen view persists.
 15. Install the same build over an existing installation. Confirm the previous uninstall finishes before files are replaced, Setup completes, and the new uninstall entry points to an existing `unins000.exe`. Verify user edits and backups remain.
 16. Export an Applied loc-pack and a Shared loc-pack. Confirm both ZIPs contain a root `global.ini`; Applied packages the current applied file, including its user edits. Shared includes base localization and enabled enhancements but excludes `user.ini` edits and the Open Strings version stamp. Confirm game files and source INIs remain unchanged. If an enabled enhancement file is missing, Shared export must fail clearly without creating a partial ZIP.

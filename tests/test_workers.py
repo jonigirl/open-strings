@@ -384,7 +384,7 @@ class TestDataForgeWorkerManifest:
         attempts = []
         rebuilt = False
 
-        def rebuild(forge, fingerprint, finalize, progress_callback=None):
+        def rebuild(forge, fingerprint, finalize, progress_callback=None, progress_pct_callback=None):
             nonlocal rebuilt
             if rebuilt:
                 return False

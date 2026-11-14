@@ -514,6 +514,97 @@ def test_mission_formatter_outputs_core_blocks(gen_module):
     assert "Turrets:" in out
 
 
+def test_mission_cooldown_details_respect_enable_flags(gen_module):
+    root = _xml(
+        '<MissionBrokerEntry hasPersonalCooldown="1" personalCooldownTime="15" '
+        'personalCooldownTimeVariation="2.5" canReacceptAfterAbandoning="1" '
+        'abandonedCooldownTime="30" abandonedCooldownTimeVariation="5" />'
+    )
+
+    assert gen_module._enh_formatters._mission_cooldown_details(root) == {
+        "Personal cooldown": "15 min (variation: 2.5 min)",
+        "Abandoned cooldown": "30 min (variation: 5 min)",
+    }
+
+    disabled = _xml(
+        '<MissionBrokerEntry hasPersonalCooldown="0" personalCooldownTime="15" '
+        'canReacceptAfterAbandoning="0" abandonedCooldownTime="30" />'
+    )
+    assert gen_module._enh_formatters._mission_cooldown_details(disabled) == {}
+
+
+def test_mission_cooldowns_aggregate_shared_description_variants(gen_module, tmp_path):
+    mission_dir = tmp_path / "missions"
+    mission_dir.mkdir()
+    (mission_dir / "first.xml").write_text(
+        '<MissionBrokerEntry description="@ExampleMission_Desc" hasPersonalCooldown="1" '
+        'personalCooldownTime="15" personalCooldownTimeVariation="2" '
+        'canReacceptAfterAbandoning="1" abandonedCooldownTime="30" />',
+        encoding="utf-8",
+    )
+    (mission_dir / "second.xml").write_text(
+        '<MissionBrokerEntry description="@ExampleMission_Desc" hasPersonalCooldown="1" '
+        'personalCooldownTime="45" canReacceptAfterAbandoning="0" abandonedCooldownTime="60" />',
+        encoding="utf-8",
+    )
+    (mission_dir / "disabled.xml").write_text(
+        '<MissionBrokerEntry description="@DisabledMission_Desc" hasPersonalCooldown="0" '
+        'personalCooldownTime="30" canReacceptAfterAbandoning="0" abandonedCooldownTime="60" />',
+        encoding="utf-8",
+    )
+    output = {"ExampleMission_Desc": "Base mission text"}
+
+    gen_module._append_mission_cooldowns(output, mission_dir, {"DisabledMission_Desc": "Disabled base"})
+
+    assert "<EM3>MISSION COOLDOWNS</EM3>" in output["ExampleMission_Desc"]
+    assert (
+        "Personal cooldown (varies by variant):</EM4> 15 min (variation: 2 min); 45 min"
+        in output["ExampleMission_Desc"]
+    )
+    assert (
+        "Abandoned cooldown (varies by variant):</EM4> 30 min; not enabled for some variants"
+        in output["ExampleMission_Desc"]
+    )
+    assert "DisabledMission_Desc" not in output
+
+
+def test_contract_generator_cooldowns_are_collected_by_description(gen_module, tmp_path):
+    contractgen_dir = tmp_path / "contractgenerator"
+    contractgen_dir.mkdir()
+    (contractgen_dir / "example.xml").write_text(
+        """
+        <Root>
+          <ContractGeneratorHandler_List debugName="Example">
+            <defaultAvailability hasPersonalCooldown="1" personalCooldownTime="15"
+              personalCooldownTimeVariation="2" canReacceptAfterAbandoning="1"
+              abandonedCooldownTime="30" />
+            <Contract>
+              <ContractStringParam param="Title" value="@ExampleMission_Title" />
+              <ContractStringParam param="Description" value="@ExampleMission_Desc" />
+            </Contract>
+          </ContractGeneratorHandler_List>
+          <ContractGeneratorHandler_List debugName="ExampleVariant">
+            <defaultAvailability hasPersonalCooldown="0" personalCooldownTime="45"
+              canReacceptAfterAbandoning="0" abandonedCooldownTime="60" />
+            <Contract>
+              <ContractStringParam param="Title" value="@ExampleMission_Title" />
+              <ContractStringParam param="Description" value="@ExampleMission_Desc" />
+            </Contract>
+          </ContractGeneratorHandler_List>
+        </Root>
+        """,
+        encoding="utf-8",
+    )
+    cooldowns = {}
+
+    gen_module.scan_contract_generators(contractgen_dir, mission_cooldowns=cooldowns)
+
+    assert cooldowns["ExampleMission_Desc"] == {
+        "Personal cooldown": {"15 min (variation: 2 min)", None},
+        "Abandoned cooldown": {"30 min", None},
+    }
+
+
 def test_mission_formatter_reputation_track_uses_placeholder_fallback(gen_module):
     root = _xml(
         """

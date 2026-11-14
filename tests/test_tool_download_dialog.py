@@ -9,6 +9,19 @@ from src.gui.tool_download_dialog import ToolDownloadDialog
 pytestmark = pytest.mark.unit
 
 
+@pytest.mark.parametrize("code", [500, 502, 503, 504])
+def test_gateway_error_does_not_show_missing_asset_hint(monkeypatch, code):
+    messages = []
+    monkeypatch.setattr(tool_download_dialog.QMessageBox, "warning", lambda *args: messages.append(args[2]))
+
+    ToolDownloadDialog._on_error(None, f"HTTP Error {code}: Gateway failure")
+
+    assert len(messages) == 1
+    assert "temporarily unavailable" in messages[0]
+    assert "HTTP 404" not in messages[0]
+    assert "not a compatible replacement" in messages[0]
+
+
 @pytest.fixture
 def blocking_download(monkeypatch):
     started = threading.Event()

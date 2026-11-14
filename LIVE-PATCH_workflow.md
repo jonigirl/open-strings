@@ -35,6 +35,7 @@ For each of the 13 enhancement INIs:
 - Compare new LIVE output with previous LIVE and latest PTU output.
 - Record added, removed, and changed keys and confirm emitted keys resolve in LIVE localization, except where enhancement-only keys are intentional.
 - Review meaningful value changes against their DataForge fields and formatter behavior.
+- For mission cooldowns, confirm the applicable enable flags, retain configured variation values, identify description keys with variant-specific timers, and verify units before release.
 - Classify compatibility warnings and retain unresolved items as explicit release risks.
 - Confirm each category can be enabled, disabled, and regenerated without losing saved user overrides.
 
@@ -47,6 +48,7 @@ Using the built app or installer:
 - Verify the displayed version and that the build contains the candidate source.
 - Test startup, channel selection, source loading, enhancement generation, and all 13 output files.
 - Check Basic/Advanced controls, appearance settings, and export behavior.
+- Confirm the `Armor & Suits` label renders literally and cached-record health progress remains determinate; inspect cooldown details in mission descriptions.
 - Test missing-source handling and Apply/Restore only when deliberate; verify the backup and restore the original game file.
 - Inspect selected in-game ship, component or weapon, armor, mission, and commodity output after a deliberate Apply. Restore the verified original file afterward.
 - If testing an installer upgrade, confirm the prior uninstaller has finished before file replacement and the resulting uninstaller registration works.
