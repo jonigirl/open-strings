@@ -48,7 +48,7 @@ Complete these gates in order. Use the current manual workflow in [TESTING.md](T
 - [x] Verify the rebuilt app's visual changes, including the literal `Armor & Suits` label and determinate cached-record progress; user confirms visual changes passed (2026-11-14).
 - [x] Include the current tool-download changes in the 1.5.3 candidate; the combined worktree passes the full test suite, Ruff, formatting, and mypy. Rebuild after the remaining sign-off checks.
 - [x] Build the signed 1.5.3 release installer (2026-11-16): app and installer signatures are valid and timestamped with the Certum certificate. No tool ZIP is bundled; the app downloads the pinned unforge package from the v1.5.2 release, whose published SHA-256 matches the pin, and downloads unp4k normally.
-- [ ] Prepare the 1.5.3 release after rebuilding with final docs, confirming installer signature and bundled tools, and completing the separately authorized tag/publish steps. Manual checks pass per user; the historical comparison gap is explicitly waived and the cooldown items are accepted known risks. Compatibility with the new PTU patch remains out of scope until after 1.5.3.
+- [x] Prepare the 1.5.3 release after rebuilding with final docs, confirming installer signature and bundled tools, and completing the separately authorized tag/publish steps. Published v1.5.3 with the signed installer on 2026-11-16. Manual checks pass per user; the historical comparison gap is explicitly waived and the cooldown items are accepted known risks. Compatibility with the new PTU patch remains out of scope until after 1.5.3.
 
 ## Deferred Work
 
