@@ -57,17 +57,20 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 
 
 def _get_documents_dir() -> Path:
-    try:
-        import winreg
+    if sys.platform == "win32":
+        try:
+            import winreg
 
-        key = winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders"
-        )
-        docs = Path(winreg.QueryValueEx(key, "Personal")[0])
-        winreg.CloseKey(key)
-        return docs
-    except Exception:
-        return Path.home() / "Documents"
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders",
+            )
+            docs = Path(winreg.QueryValueEx(key, "Personal")[0])
+            winreg.CloseKey(key)
+            return docs
+        except OSError:
+            pass
+    return Path.home() / "Documents"
 
 
 def _get_default_cache_dir() -> Path:
