@@ -499,10 +499,9 @@ def _format_mission_cooldown(value: str | None, variation: str | None) -> str | 
 
 def _mission_cooldown_details(root: ET.Element) -> dict[str, str]:
     details = {}
-    if root.get("hasPersonalCooldown") == "1":
-        cooldown = _format_mission_cooldown(root.get("personalCooldownTime"), root.get("personalCooldownTimeVariation"))
-        if cooldown:
-            details["Personal cooldown"] = cooldown
+    cooldown = _format_mission_cooldown(root.get("personalCooldownTime"), root.get("personalCooldownTimeVariation"))
+    if cooldown:
+        details["Personal cooldown after success"] = cooldown
     if root.get("canReacceptAfterAbandoning") == "1":
         cooldown = _format_mission_cooldown(
             root.get("abandonedCooldownTime"), root.get("abandonedCooldownTimeVariation")

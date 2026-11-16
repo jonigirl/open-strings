@@ -14,8 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Underbarrel flashlight descriptions show linked beam radius, intensity, and
   named tint when available.
 - Shared localization export excludes personal edits and the version stamp.
-- Mission descriptions show enabled personal and abandoned cooldowns, including
-  configured variations and variant-specific values.
+- Mission descriptions show configured post-success personal cooldowns with their
+  variations, even when the initial availability flag is off. Abandonment cooldowns
+  appear when re-acceptance is allowed; shared descriptions identify variant-specific
+  values.
 
 ### Fixed
 
@@ -46,6 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before extraction.
 - Restore Backup accepts only validated backups from the active channel and saves
   the current game file before replacing it.
+- Generating enhancements after a reinstall extracts the missing base localization
+  file first, instead of failing after DataForge extraction.
 - Apply snapshots edits, aborts if the active channel/data folder changes, and
   restores the prior game file if a later persistence step fails.
 - Backup filenames remain unique when multiple backups are created in quick succession.

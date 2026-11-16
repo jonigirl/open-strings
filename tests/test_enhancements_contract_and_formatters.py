@@ -514,7 +514,7 @@ def test_mission_formatter_outputs_core_blocks(gen_module):
     assert "Turrets:" in out
 
 
-def test_mission_cooldown_details_respect_enable_flags(gen_module):
+def test_mission_cooldown_details_show_configured_personal_when_flag_is_off(gen_module):
     root = _xml(
         '<MissionBrokerEntry hasPersonalCooldown="1" personalCooldownTime="15" '
         'personalCooldownTimeVariation="2.5" canReacceptAfterAbandoning="1" '
@@ -522,7 +522,7 @@ def test_mission_cooldown_details_respect_enable_flags(gen_module):
     )
 
     assert gen_module._enh_formatters._mission_cooldown_details(root) == {
-        "Personal cooldown": "15 min (variation: 2.5 min)",
+        "Personal cooldown after success": "15 min (variation: 2.5 min)",
         "Abandoned cooldown": "30 min (variation: 5 min)",
     }
 
@@ -530,7 +530,9 @@ def test_mission_cooldown_details_respect_enable_flags(gen_module):
         '<MissionBrokerEntry hasPersonalCooldown="0" personalCooldownTime="15" '
         'canReacceptAfterAbandoning="0" abandonedCooldownTime="30" />'
     )
-    assert gen_module._enh_formatters._mission_cooldown_details(disabled) == {}
+    assert gen_module._enh_formatters._mission_cooldown_details(disabled) == {
+        "Personal cooldown after success": "15 min",
+    }
 
 
 def test_mission_cooldowns_aggregate_shared_description_variants(gen_module, tmp_path):
@@ -558,14 +560,14 @@ def test_mission_cooldowns_aggregate_shared_description_variants(gen_module, tmp
 
     assert "<EM3>MISSION COOLDOWNS</EM3>" in output["ExampleMission_Desc"]
     assert (
-        "Personal cooldown (varies by variant):</EM4> 15 min (variation: 2 min); 45 min"
+        "Personal cooldown after success (varies by variant):</EM4> 15 min (variation: 2 min); 45 min"
         in output["ExampleMission_Desc"]
     )
     assert (
         "Abandoned cooldown (varies by variant):</EM4> 30 min; not enabled for some variants"
         in output["ExampleMission_Desc"]
     )
-    assert "DisabledMission_Desc" not in output
+    assert "Personal cooldown after success:</EM4> 30 min" in output["DisabledMission_Desc"]
 
 
 def test_contract_generator_cooldowns_are_collected_by_description(gen_module, tmp_path):
@@ -600,7 +602,7 @@ def test_contract_generator_cooldowns_are_collected_by_description(gen_module, t
     gen_module.scan_contract_generators(contractgen_dir, mission_cooldowns=cooldowns)
 
     assert cooldowns["ExampleMission_Desc"] == {
-        "Personal cooldown": {"15 min (variation: 2 min)", None},
+        "Personal cooldown after success": {"15 min (variation: 2 min)", "45 min"},
         "Abandoned cooldown": {"30 min", None},
     }
 

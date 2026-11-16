@@ -14,7 +14,7 @@ Open Strings is a fork of [Smart Citizen by Osiris DevWorks](https://github.com/
 - **Column filters** — filter Category, Favourite, and Status values, and match text using Contains, Exact, Starts with, or Excludes.
 - **Detachable log viewer** — monitor extraction and generation in a separate non-modal window without losing the log buffer.
 - **Launcher menu heading** — rename the heading shown in the Star Citizen launcher; optionally show the Open Strings version suffix.
-- **Auto-generated enhancements** — stat overlays for ships, components, weapons, armor and suits, missions, journal entries, and commodity crafting. Mission descriptions can include enabled personal and abandoned cooldowns with configured variations; categories are togglable independently.
+- **Auto-generated enhancements** — stat overlays for ships, components, weapons, armor and suits, missions, journal entries, and commodity crafting. Mission descriptions show configured post-success personal cooldowns even when the initial availability flag is off, plus abandonment cooldowns when re-acceptance is allowed; recorded variations are included.
 - **Safe apply** — timestamped backups before every write, automatic rollback on validation mismatch, up to 5 backups per channel.
 
 ## Data And Cache

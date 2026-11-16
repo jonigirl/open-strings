@@ -14,6 +14,17 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def _cache_with_base_ini(tmp_path, monkeypatch):
+    """Keep coordinator tests away from the real channel cache and P4K extraction."""
+    from src.utils.settings import AppSettings
+
+    cache = tmp_path / "isolated-cache"
+    cache.mkdir()
+    (cache / "base.ini").write_text("k=v\n", encoding="utf-8")
+    monkeypatch.setattr(AppSettings, "get_cache_dir", staticmethod(lambda: cache))
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
@@ -653,6 +664,59 @@ class TestStatusAccessors:
 
 
 class TestEnhancementsPipelineRouting:
+    def test_missing_base_extracts_it_before_dataforge_then_resumes(self, qtbot, tmp_path):
+        coord, _ = _make_coordinator(qtbot)
+
+        def fake_p4k_extraction():
+            coord._p4k_worker = _mock_worker()
+
+        with (
+            patch("src.utils.settings.AppSettings.get_cache_dir", return_value=tmp_path),
+            patch.object(coord, "start_p4k_extraction", side_effect=fake_p4k_extraction) as extract_base,
+            patch.object(coord, "start_dataforge_extraction") as extract_forge,
+            patch.object(coord, "start_enhancements_generation") as generate,
+        ):
+            coord.start_enhancements_pipeline()
+            extract_base.assert_called_once_with()
+            extract_forge.assert_not_called()
+            generate.assert_not_called()
+
+            (tmp_path / "base.ini").write_text("k=v\n", encoding="utf-8")
+            with patch.object(coord, "start_enhancements_pipeline") as resume:
+                coord._on_p4k_done(True)
+            resume.assert_called_once_with()
+        assert coord._resume_enhancements_after_p4k is False
+
+    def test_failed_base_extraction_reports_generation_failure(self, qtbot, tmp_path):
+        coord, _ = _make_coordinator(qtbot)
+        coord._resume_enhancements_after_p4k = True
+        results = []
+        coord.enhancements_finished.connect(results.append)
+        with (
+            patch("src.utils.settings.AppSettings.get_cache_dir", return_value=tmp_path),
+            patch.object(coord, "start_enhancements_pipeline") as resume,
+        ):
+            coord._on_p4k_done(False)
+
+        resume.assert_not_called()
+        assert results == [False]
+
+    def test_missing_base_after_dataforge_extraction_does_not_start_generator(self, qtbot, tmp_path):
+        coord, _ = _make_coordinator(qtbot)
+        errors, results = [], []
+        coord.enhancements_error.connect(errors.append)
+        coord.enhancements_finished.connect(results.append)
+        with (
+            patch("src.utils.settings.AppSettings.get_cache_dir", return_value=tmp_path),
+            patch.object(coord, "start_p4k_extraction"),
+            patch("src.gui.worker_coordinator.EnhancementsGeneratorWorker") as worker,
+        ):
+            coord.start_enhancements_generation(force_full=True)
+
+        worker.assert_not_called()
+        assert results == [False]
+        assert "Config" in errors[0]
+
     def test_pipeline_routes_to_generation_when_forge_fresh(self, qtbot):
         coord, _ = _make_coordinator(qtbot)
 

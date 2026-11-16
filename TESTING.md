@@ -128,11 +128,13 @@ uv run pytest tests/ --tb=short
    signature lines. Fractional reductions keep one decimal place.
 5. Check an FPS weapon with several fire modes (for example a rifle with auto and
    semi-auto). Differing rates are listed per mode.
-6. Check a mission description with cooldown data, a ship description, temporary
-   blueprint mission access, and a vehicle rental description. Confirm enabled
-   personal and abandoned cooldown settings include their variations, and note
-   whether the displayed time unit matches game behavior. Temporary access must
-   not be labelled as permanent blueprint ownership; rentals must include their duration.
+6. Check mission descriptions with configured personal and abandonment cooldowns.
+   Confirm personal cooldowns appear after successful completion even when the
+   initial flag is off, and abandonment cooldowns appear when re-acceptance is
+   allowed. Record variations and compare the configured values with mission
+   repopulation after completion versus abandonment; the game has no native timer
+   display. Also check temporary blueprint access and vehicle rentals: temporary
+   access must not be labelled as permanent ownership, and rentals must include duration.
 7. Disable a category and regenerate. Confirm it does not force a full rebuild,
    then re-enable it and confirm current output returns with saved overrides intact.
 8. Start a tool download from Config and press Esc or Cancel. The dialog shows

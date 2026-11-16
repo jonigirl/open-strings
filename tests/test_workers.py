@@ -144,6 +144,29 @@ class TestBaseIniGenerationMarker:
         assert _base_ini_needs_regeneration(base_ini, tmp_path) is True
 
 
+@pytest.mark.regression
+def test_generator_missing_base_fails_before_patching(monkeypatch, tmp_path):
+    from src.gui.workers import EnhancementsGeneratorWorker
+    from src.utils.settings import AppSettings
+
+    rebuild = MagicMock()
+    monkeypatch.setattr(AppSettings, "get_cache_dir", lambda: tmp_path)
+    monkeypatch.setattr("src.utils.pak_extractor.rebuild_patched_dataforge_cache", rebuild)
+    worker = EnhancementsGeneratorWorker(categories={"ship_descs"})
+    errors = []
+    results = []
+    worker.error.connect(errors.append)
+    worker.finished.connect(results.append)
+
+    worker.run()
+
+    rebuild.assert_not_called()
+    assert results == [False]
+    assert len(errors) == 1
+    assert "base.ini" in errors[0]
+    assert "Config" in errors[0]
+
+
 @pytest.mark.unit
 class TestDiffCategoryTranslation:
     """DIFF_CATEGORY_TO_GENERATOR_KEYS must translate dirty_categories() output

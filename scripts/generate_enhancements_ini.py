@@ -630,7 +630,7 @@ def _mission_loc_key(root: ET.Element) -> str | None:
     return None
 
 
-_MISSION_COOLDOWN_LABELS = ("Personal cooldown", "Abandoned cooldown")
+_MISSION_COOLDOWN_LABELS = ("Personal cooldown after success", "Abandoned cooldown")
 
 
 def _record_mission_cooldowns(

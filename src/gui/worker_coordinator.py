@@ -106,6 +106,7 @@ class WorkerCoordinator(QObject):
         self._p4k_worker: P4kExtractWorker | None = None
         self._enhancements_worker: EnhancementsGeneratorWorker | None = None
         self.enhancements_changed = False
+        self._resume_enhancements_after_p4k = False
         self._forge_worker: DataForgeExtractWorker | None = None
 
         # ── Progress dialogs ──────────────────────────────────────────────
@@ -357,6 +358,12 @@ class WorkerCoordinator(QObject):
             self._p4k_worker.wait()
             self._p4k_worker = None
         self.p4k_finished.emit(success)
+        if self._resume_enhancements_after_p4k:
+            self._resume_enhancements_after_p4k = False
+            if success and (AppSettings.get_cache_dir() / "base.ini").is_file():
+                self.start_enhancements_pipeline()
+            else:
+                self.enhancements_finished.emit(False)
 
     # ── DataForge extraction ──────────────────────────────────────────────
 
@@ -418,6 +425,8 @@ class WorkerCoordinator(QObject):
         """Entry point for the enhancements button: extract DataForge if needed, then generate."""
         if self._enhancements_worker is not None or self._forge_worker is not None:
             return
+        if self._extract_missing_base_ini_first():
+            return
 
         from src.utils.pak_extractor import dataforge_cache_is_fresh
 
@@ -440,6 +449,8 @@ class WorkerCoordinator(QObject):
         No-ops if a generation is already running.
         """
         if self._enhancements_worker is not None:
+            return
+        if self._extract_missing_base_ini_first():
             return
 
         self.enhancements_changed = False
@@ -466,6 +477,28 @@ class WorkerCoordinator(QObject):
         worker.finished.connect(self._on_enhancements_done)
         worker.start()
         self._parent.start_spinner()
+
+    def _extract_missing_base_ini_first(self) -> bool:
+        """Start base.ini extraction when it is missing; generation resumes afterwards.
+
+        The uninstaller clears each channel's cache, so a reinstall can have a
+        fresh DataForge cache but no base.ini. Returns True when the caller
+        must not continue because extraction is pending or could not start.
+        """
+        if (AppSettings.get_cache_dir() / "base.ini").is_file():
+            return False
+        if self._resume_enhancements_after_p4k:
+            return True
+        logger.info("base.ini missing — extracting it from Data.p4k before generating enhancements")
+        self._resume_enhancements_after_p4k = True
+        self.start_p4k_extraction()
+        if self._p4k_worker is None:
+            self._resume_enhancements_after_p4k = False
+            self.enhancements_error.emit(
+                "base.ini is missing. Use Extract from Data.p4k in the Config tab, then generate again."
+            )
+            self.enhancements_finished.emit(False)
+        return True
 
     @pyqtSlot(str)
     def _on_enhancements_err(self, message: str) -> None:

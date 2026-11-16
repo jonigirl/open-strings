@@ -551,6 +551,11 @@ class EnhancementsGeneratorWorker(QThread):
                 raise FileNotFoundError(f"Enhancements generator script not found: {script_path}")
 
             base_ini = AppSettings.get_cache_dir() / "base.ini"
+            if not base_ini.is_file():
+                raise FileNotFoundError(
+                    f"base.ini not found at {base_ini}. "
+                    "Use Extract from Data.p4k in the Config tab, then generate again."
+                )
             cache_dir = AppSettings.get_cache_dir()
             forge_dir = AppSettings.get_dataforge_cache_dir()
             patch_fingerprint = patch_set_fingerprint(_resolve_patches_dir())

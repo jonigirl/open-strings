@@ -35,7 +35,7 @@ For each of the 13 enhancement INIs:
 - Compare new LIVE output with previous LIVE and latest PTU output.
 - Record added, removed, and changed keys and confirm emitted keys resolve in LIVE localization, except where enhancement-only keys are intentional.
 - Review meaningful value changes against their DataForge fields and formatter behavior.
-- For mission cooldowns, confirm the applicable enable flags, retain configured variation values, identify description keys with variant-specific timers, and verify units before release.
+- For mission cooldowns, show positive configured personal timers after success regardless of the initial flag; show abandonment timers only when re-acceptance is allowed. Retain variations, identify rank/description variants, and verify units and runtime triggers before release.
 - Classify compatibility warnings and retain unresolved items as explicit release risks.
 - Confirm each category can be enabled, disabled, and regenerated without losing saved user overrides.
 
