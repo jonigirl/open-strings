@@ -2,10 +2,6 @@
 
 _Customize Star Citizen's localization strings._
 
-## Fork notice
-
-Open Strings is a fork of [Smart Citizen by Osiris DevWorks](https://github.com/Osiris-DevWorks/smart-citizen), modified by Joni Hayes. Distributed under GPL-3.0-only.
-
 ## Features
 
 - **Multi-channel support** — LIVE / PTU / EPTU / HOTFIX / TECH-PREVIEW each get an isolated workspace (independent `user.ini`, cache, backups, DataForge extraction, enhancement INIs).
